@@ -16,6 +16,10 @@ class CreateListingPage extends StatefulWidget {
 }
 
 class _CreateListingPageState extends State<CreateListingPage> {
+  // UI
+  static const _primary = Color(0xFF0F6E5D);
+  static const _cardBg = Color(0xFFF7F8FA);
+
   final _title = TextEditingController();
   final _price = TextEditingController();
   XFile? _picked;
@@ -61,7 +65,6 @@ class _CreateListingPageState extends State<CreateListingPage> {
     setState(() => _catsBusy = true);
     try {
       final cats = _uniqById(await CatalogApi().categories());
-      // Asegura un value válido
       final ids = cats.map((c) => c['id'] as String).toSet();
       String? selected = _categoryId;
       if (selected == null || !ids.contains(selected)) {
@@ -146,7 +149,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
         ? '(${_lat!.toStringAsFixed(5)}, ${_lon!.toStringAsFixed(5)})'
         : '(—, —)';
 
-    // Dedup + garantiza que el value exista en items (evita el assert)
+    // Garantiza value válido en dropdowns
     final catItems = _uniqById(_categories);
     String? catValue = _categoryId;
     if (catValue == null || !catItems.any((c) => c['id'] == catValue)) {
@@ -160,34 +163,86 @@ class _CreateListingPageState extends State<CreateListingPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Crear Listing')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: const IconThemeData(color: _primary),
+        title: const Text(
+          'Crear Listing',
+          style: TextStyle(
+            color: _primary,
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
+          ),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
           if (_err != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Text(_err!, style: const TextStyle(color: Colors.red)),
             ),
 
-          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Título')),
-          TextField(
+          _sectionTitle('Información básica'),
+          const SizedBox(height: 8),
+          _textField(
+            controller: _title,
+            label: 'Título',
+            hint: 'Ej. MacBook Pro 13” M1',
+          ),
+          const SizedBox(height: 12),
+          _textField(
             controller: _price,
-            decoration: const InputDecoration(labelText: 'Precio (COP)'),
+            label: 'Precio (COP)',
+            hint: 'Solo números',
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
-          const SizedBox(height: 8),
-
-          Row(children: [
-            FilledButton(onPressed: _pick, child: const Text('Cámara/Galería')),
-            const SizedBox(width: 12),
-            if (_picked != null) Expanded(child: Text(_picked!.name, overflow: TextOverflow.ellipsis)),
-          ]),
           const SizedBox(height: 16),
 
-          // -------- CATEGORÍA: elegir o crear --------
-          if (_catsBusy) const LinearProgressIndicator(),
+          _sectionTitle('Foto'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _pillButton(
+                icon: Icons.photo_camera_outlined,
+                label: 'Cámara/Galería',
+                onTap: _pick,
+              ),
+              const SizedBox(width: 12),
+              if (_picked != null)
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _cardBg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _picked!.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          _sectionTitle('Categoría y marca'),
+          const SizedBox(height: 8),
+          if (_catsBusy) const LinearProgressIndicator(minHeight: 3),
+          const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             value: catValue,
             items: catItems.map((c) {
@@ -199,19 +254,15 @@ class _CreateListingPageState extends State<CreateListingPage> {
               setState(() => _categoryId = v);
               if (v != null) _loadBrandsForCategory(v);
             },
-            decoration: InputDecoration(
-              labelText: 'Categoría',
+            decoration: _inputDecoration('Categoría').copyWith(
               suffixIcon: IconButton(
                 tooltip: 'Crear categoría',
-                icon: const Icon(Icons.add),
+                icon: const Icon(Icons.add_circle_outline, color: _primary),
                 onPressed: _catsBusy ? null : _createCategoryDialog,
               ),
             ),
           ),
-
           const SizedBox(height: 12),
-
-          // -------- MARCA: elegir (filtrada por categoría) o crear --------
           IgnorePointer(
             ignoring: _brandsBusy,
             child: Opacity(
@@ -224,11 +275,10 @@ class _CreateListingPageState extends State<CreateListingPage> {
                   return DropdownMenuItem(value: id, child: Text(name));
                 }).toList(),
                 onChanged: (v) => setState(() => _brandId = v),
-                decoration: InputDecoration(
-                  labelText: 'Marca',
+                decoration: _inputDecoration('Marca').copyWith(
                   suffixIcon: IconButton(
                     tooltip: 'Crear marca',
-                    icon: const Icon(Icons.add),
+                    icon: const Icon(Icons.add_circle_outline, color: _primary),
                     onPressed: _brandsBusy ? null : _createBrandDialog,
                   ),
                 ),
@@ -236,48 +286,148 @@ class _CreateListingPageState extends State<CreateListingPage> {
             ),
           ),
           if (_brandsBusy) const Padding(
-            padding: EdgeInsets.only(top: 4),
-            child: LinearProgressIndicator(),
+            padding: EdgeInsets.only(top: 6),
+            child: LinearProgressIndicator(minHeight: 3),
           ),
 
-          const SizedBox(height: 16),
-
-          // ---------- Ubicación ----------
-          SwitchListTile(
-            value: _useLocation,
-            onChanged: (v) {
-              setState(() => _useLocation = v);
-              if (v) _initLocation();
-            },
-            title: const Text('Adjuntar mi ubicación'),
-            subtitle: _locBusy
-                ? const Text('Obteniendo ubicación…')
-                : Text(_locMsg ?? (_lat != null ? 'Ubicación lista' : 'Sin ubicación')),
+          const SizedBox(height: 20),
+          _sectionTitle('Ubicación'),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: _useLocation,
+                  onChanged: (v) {
+                    setState(() => _useLocation = v);
+                    if (v) _initLocation();
+                  },
+                  title: const Text('Adjuntar mi ubicación'),
+                  subtitle: _locBusy
+                      ? const Text('Obteniendo ubicación…')
+                      : Text(_locMsg ?? (_lat != null ? 'Ubicación lista' : 'Sin ubicación')),
+                  activeColor: _primary,
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(coordsText, style: const TextStyle(fontSize: 12)),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _locBusy ? null : _initLocation,
+                      tooltip: 'Reintentar',
+                      icon: const Icon(Icons.my_location, size: 20, color: _primary),
+                    ),
+                    TextButton(
+                      onPressed: () => Geolocator.openLocationSettings(),
+                      child: const Text('Ajustes de ubicación'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-          Row(
-            children: [
-              Text(coordsText, style: const TextStyle(fontSize: 12)),
-              const SizedBox(width: 8),
-              IconButton(
-                onPressed: _locBusy ? null : _initLocation,
-                tooltip: 'Reintentar ubicación',
-                icon: const Icon(Icons.my_location),
-              ),
-              TextButton(
-                onPressed: () => Geolocator.openLocationSettings(),
-                child: const Text('Ajustes de ubicación'),
-              ),
-            ],
-          ),
 
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: Text(_busy ? 'Subiendo…' : 'Publicar'),
+          const SizedBox(height: 24),
+          _primaryButton(
+            text: _busy ? 'Subiendo…' : 'Publicar',
+            onTap: _busy ? null : _submit,
           ),
           if (_status != null)
-            Padding(padding: const EdgeInsets.only(top: 12), child: Text(_status!)),
-        ]),
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(_status!, style: const TextStyle(fontSize: 13)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- UI helpers (solo estilo) ----------
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w800,
+        color: Colors.black87,
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(String label, {String? hint}) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      floatingLabelStyle: const TextStyle(color: _primary, fontWeight: FontWeight.w600),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _primary, width: 1.6),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    );
+  }
+
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      decoration: _inputDecoration(label, hint: hint),
+    );
+  }
+
+  Widget _pillButton({required IconData icon, required String label, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: _primary,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _primaryButton({required String text, VoidCallback? onTap}) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
       ),
     );
   }
@@ -306,7 +456,6 @@ class _CreateListingPageState extends State<CreateListingPage> {
       final cat = await CatalogApi().createCategory(name: name);
       final newId = (cat['id'] ?? cat['uuid']) as String;
 
-      // Añade/garantiza que exista en la lista y selecciona
       final next = _uniqById([..._categories, cat]);
       setState(() {
         _categories = next;
@@ -375,7 +524,6 @@ class _CreateListingPageState extends State<CreateListingPage> {
       setState(() => _brandsBusy = true);
       final brand = await CatalogApi().createBrand(name: name, categoryId: selectedCat!);
 
-      // Si cambió de categoría, muévete a esa
       if (_categoryId != selectedCat) {
         setState(() => _categoryId = selectedCat);
       }
@@ -404,7 +552,6 @@ class _CreateListingPageState extends State<CreateListingPage> {
     setState(() { _busy = true; _status = 'Creando listing…'; _err = null; });
 
     try {
-      // El usuario escribe en pesos; convertimos a centavos
       final units = int.tryParse(_price.text.trim()) ?? 0;
       final priceCents = units * 100;
 
@@ -423,12 +570,10 @@ class _CreateListingPageState extends State<CreateListingPage> {
         'quick_view_enabled': true,
       };
 
-      // 1) Crear listing
       final listing = await ListingsApi().create(payload);
 
       setState(() => _status = 'Comprimiendo imagen…');
 
-      // 2) Comprimir imagen
       final original = File(_picked!.path);
       final bytes = await original.readAsBytes();
       final compressed = await FlutterImageCompress.compressWithList(
@@ -437,7 +582,6 @@ class _CreateListingPageState extends State<CreateListingPage> {
 
       setState(() => _status = 'Subiendo imagen…');
 
-      // 3) Presign + PUT + Confirm
       final imgApi = ImagesApi();
       final (uploadUrl, objectKey) = await imgApi.presign(
         listingId: listing['id'] as String,

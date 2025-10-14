@@ -14,24 +14,26 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // UI state
+  // -------- UI state --------
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
 
   bool _loading = false;
   String? _err;
 
-  // Data
-  List<Map<String, dynamic>> _all = [];      // todos los listings
-  List<Map<String, dynamic>> _items = [];    // filtrados
+  // -------- Data (sin cambios) --------
+  List<Map<String, dynamic>> _all = [];
+  List<Map<String, dynamic>> _items = [];
   List<Map<String, dynamic>> _categories = [];
-  Map<String, String> _brandById = {};       // id -> nombre
-  Map<String, String> _categoryById = {};    // id -> nombre
-  String? _selectedCategoryId;               // null = Todas
+  Map<String, String> _brandById = {};
+  Map<String, String> _categoryById = {};
+  String? _selectedCategoryId;
 
-  // Expanded state + cache de fotos
+  // cache fotos
   final Set<String> _expanded = <String>{};
-  final Map<String, String> _photoUrlCache = {}; // listingId -> photoUrl
+  final Map<String, String> _photoUrlCache = {};
+
+  static const _primary = Color(0xFF0F6E5D);
 
   @override
   void initState() {
@@ -47,17 +49,16 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // -------------------- Bootstrap --------------------
+  // -------------------- Bootstrap (igual) --------------------
   Future<void> _bootstrap() async {
     setState(() { _loading = true; _err = null; });
 
     try {
-      // Cargar catálogo (categorías y marcas) en paralelo
       final catalog = CatalogApi();
       final futures = await Future.wait([
         catalog.categories(),
-        catalog.brands(), // todas las marcas (para resolver nombres)
-        ListingsApi().list(), // todos los listings
+        catalog.brands(),
+        ListingsApi().list(),
       ]);
 
       final cats = List<Map<String, dynamic>>.from(futures[0] as List);
@@ -86,7 +87,6 @@ class _HomePageState extends State<HomePage> {
 
   Map<String, dynamic> _augmentListing(Map<String, dynamic> it) {
     final m = Map<String, dynamic>.from(it);
-    // Resuelve nombres si vienen solo los IDs
     final brandId = (m['brand_id'] ?? m['brandId'])?.toString();
     final catId   = (m['category_id'] ?? m['categoryId'])?.toString();
 
@@ -162,19 +162,43 @@ class _HomePageState extends State<HomePage> {
     if (_photoUrlCache.containsKey(listingId)) return;
     try {
       final url = await ImagesApi().preview(objectKey);
-      setState(() {
-        _photoUrlCache[listingId] = url;
-      });
-    } catch (_) {
-      // Silencioso; dejamos el placeholder
-    }
+      if (!mounted) return;
+      setState(() { _photoUrlCache[listingId] = url; });
+    } catch (_) {/* placeholder */}
   }
 
   // -------------------- UI --------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Listings')),
+      backgroundColor: Colors.white,
+
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleSpacing: 16,
+        title: const Text(
+          'Home',
+          style: TextStyle(
+            color: _primary,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        actions: [
+          _circleIcon(icon: Icons.search, onTap: _openSearchSheet),
+          const SizedBox(width: 8),
+          _circleIcon(
+            icon: Icons.shopping_cart_outlined,
+            onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Cart no implementado aún')),
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
+
       body: RefreshIndicator(
         onRefresh: () async { await _bootstrap(); },
         child: _loading
@@ -187,64 +211,132 @@ class _HomePageState extends State<HomePage> {
                     )
                   ])
                 : ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     children: [
-                      _buildSearchBar(),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       _buildCategoryChips(),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
+                      _buildSectionHeader(),
+                      const SizedBox(height: 12),
                       if (_items.isEmpty)
                         const Padding(
-                          padding: EdgeInsets.all(24),
+                          padding: EdgeInsets.symmetric(vertical: 40),
                           child: Center(child: Text('Sin resultados')),
-                        ),
-                      ..._items.map(_buildListingCard),
-                      const SizedBox(height: 80),
+                        )
+                      else
+                        _buildGrid(), // <— sin overflow
+                      const SizedBox(height: 24),
                     ],
                   ),
       ),
+
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/listings/create'),
         label: const Text('Publicar'),
         icon: const Icon(Icons.add),
+        backgroundColor: _primary,
       ),
     );
   }
 
-  Widget _buildSearchBar() {
-    return TextField(
-      controller: _searchCtrl,
-      decoration: InputDecoration(
-        hintText: 'Buscar por título, marca o categoría…',
-        prefixIcon: const Icon(Icons.search),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  // ---------- Widgets auxiliares ----------
+  Widget _circleIcon({required IconData icon, VoidCallback? onTap}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: _primary, size: 20),
+        ),
       ),
-      textInputAction: TextInputAction.search,
-      onSubmitted: (_) => _applyFilters(),
+    );
+  }
+
+  void _openSearchSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16, right: 16,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            top: 8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por título, marca o categoría…',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) {
+                  _applyFilters();
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSectionHeader() {
+    return Row(
+      children: [
+        const Expanded(
+          child: Text(
+            'Popular Product',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+        GestureDetector(
+          onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Filter no implementado aún')),
+          ),
+          child: Text(
+            'Filter',
+            style: TextStyle(
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildCategoryChips() {
     final chips = <Widget>[
-      ChoiceChip(
-        label: const Text('Todas'),
-        selected: _selectedCategoryId == null,
-        onSelected: (_) {
-          setState(() => _selectedCategoryId = null);
-          _applyFilters();
-        },
-      ),
+      _categoryChip(label: 'Technology', id: null, selected: _selectedCategoryId == null),
       for (final c in _categories)
         Padding(
           padding: const EdgeInsets.only(left: 8),
-          child: ChoiceChip(
-            label: Text((c['name'] ?? '').toString()),
+          child: _categoryChip(
+            label: (c['name'] ?? '').toString(),
+            id: c['id'] as String,
             selected: _selectedCategoryId == c['id'],
-            onSelected: (_) {
-              setState(() => _selectedCategoryId = c['id'] as String);
-              _applyFilters();
-            },
           ),
         ),
     ];
@@ -255,18 +347,59 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _categoryChip({required String label, String? id, required bool selected}) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) {
+        setState(() => _selectedCategoryId = id);
+        _applyFilters();
+      },
+      shape: const StadiumBorder(),
+      backgroundColor: Colors.white,
+      labelStyle: TextStyle(
+        color: selected ? Colors.white : _primary,
+        fontWeight: FontWeight.w600,
+      ),
+      side: BorderSide(
+        color: selected ? Colors.transparent : Colors.grey.shade300,
+      ),
+      selectedColor: _primary,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    );
+  }
+
+  // ---------- GRID sin overflow ----------
+  Widget _buildGrid() {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _items.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        // Altura fija generosa para evitar cualquier “bottom overflow”
+        mainAxisExtent: 300, // si tu fuente del sistema es MUY grande, sube a 310–320
+      ),
+      itemBuilder: (context, index) => _buildListingCard(_items[index]),
+    );
+  }
+
+  // Tarjeta compacta tipo catálogo (ajustes de espacios)
   Widget _buildListingCard(Map<String, dynamic> it) {
     final id = (it['id'] ?? it['uuid']).toString();
-    final expanded = _expanded.contains(id);
 
     // precio
-    final cents = (it['price_cents'] ?? 0) as int;
-    final price = cents ~/ 100;
+    final centsRaw = it['price_cents'];
+    final cents = (centsRaw is int) ? centsRaw : int.tryParse('$centsRaw') ?? 0;
+    final priceText = _formatMoney(cents);
 
     // textos
     final title = (it['title'] ?? '').toString();
     final brand = (it['brand_name'] ?? it['brand']?['name'] ?? '').toString();
     final cat   = (it['category_name'] ?? it['category']?['name'] ?? '').toString();
+    final subtitle = brand.isNotEmpty ? brand : cat;
 
     // URLs
     final immediateUrl = _firstPhotoUrl(it);
@@ -274,91 +407,104 @@ class _HomePageState extends State<HomePage> {
     final cachedUrl    = _photoUrlCache[id];
     final photoUrl     = immediateUrl ?? cachedUrl;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: InkWell(
-        onTap: () async {
-          setState(() {
-            if (expanded) {
-              _expanded.remove(id);
-            } else {
-              _expanded.add(id);
-            }
-          });
-          // Si se expandió y no tenemos url pero sí storage_key, pide preview
-          if (!expanded && photoUrl == null && storageKey != null) {
-            await _ensurePhotoUrlFor(id, storageKey);
-          }
-        },
-        child: AnimatedCrossFade(
-          crossFadeState: expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 220),
-          firstChild: ListTile(
-            title: Text(title),
-            subtitle: Text(brand.isNotEmpty ? '$brand · $cat' : cat),
-            trailing: Text('\$ $price', style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          secondChild: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ListTile(
-                title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(brand.isNotEmpty ? '$brand · $cat' : cat),
-                trailing: Text('\$ $price', style: const TextStyle(fontWeight: FontWeight.bold)),
-              ),
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: (photoUrl != null)
+    if (photoUrl == null && storageKey != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _ensurePhotoUrlFor(id, storageKey);
+      });
+    }
+
+    return InkWell(
+      onTap: () => context.push('/listings/$id'),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F8FA),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Imagen cuadrada
+            AspectRatio(
+              aspectRatio: 1,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: photoUrl != null
                     ? CachedNetworkImage(
                         imageUrl: photoUrl,
                         fit: BoxFit.cover,
-                        placeholder: (c, _) => const Center(child: CircularProgressIndicator()),
-                        errorWidget: (c, _, __) => const Center(child: Icon(Icons.image_not_supported_outlined)),
+                        placeholder: (c, _) => Container(color: Colors.grey.shade200),
+                        errorWidget: (c, _, __) => Container(
+                          color: Colors.grey.shade200,
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.image_not_supported_outlined),
+                        ),
                       )
                     : Container(
-                        color: Colors.grey.shade200,
+                        color: Colors.grey.shade300,
                         alignment: Alignment.center,
-                        child: const Icon(Icons.image_outlined, size: 48),
+                        child: const Icon(Icons.image_outlined, size: 40, color: Colors.white),
                       ),
               ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: DefaultTextStyle.merge(
-                  style: TextStyle(color: Colors.grey.shade700),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (it['description'] != null && (it['description'] as String).trim().isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Text(it['description']),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  priceText,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                ),
+                const Spacer(),
+                InkWell(
+                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Añadido al carrito (demo)')),
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
                         ),
-                      Row(
-                        children: [
-                          const Icon(Icons.sell_outlined, size: 16),
-                          const SizedBox(width: 6),
-                          Text('Condición: ${it['condition'] ?? '—'}'),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Icon(Icons.inventory_2_outlined, size: 16),
-                          const SizedBox(width: 6),
-                          Text('Cantidad: ${it['quantity'] ?? 1}'),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                    ],
+                      ],
+                    ),
+                    child: const Icon(Icons.add, size: 18, color: _primary),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  // -------- utilitario de dinero --------
+  String _formatMoney(int cents) {
+    final intPart = cents ~/ 100;
+    final rem = cents % 100;
+    if (rem == 0) return '\$$intPart';
+    return '\$${(cents / 100).toStringAsFixed(2)}';
   }
 }
