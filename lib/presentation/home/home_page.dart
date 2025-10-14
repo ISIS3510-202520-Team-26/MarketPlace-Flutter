@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/api/listings_api.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -10,9 +9,9 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  List<Map> _items = [];
   bool _loading = false;
   String? _err;
+  List<Map<String, dynamic>> _items = [];
 
   @override
   void initState() {
@@ -21,10 +20,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() { _loading = true; _err = null; });
     try {
-      final list = await ListingsApi().list();
-      setState(() => _items = list);
+      final res = await ListingsApi().list(); // asume GET /listings
+      setState(() => _items = List<Map<String, dynamic>>.from(res as List));
     } catch (e) {
       setState(() => _err = '$e');
     } finally {
@@ -35,41 +34,38 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Listings'),
-        actions: [
-          IconButton(
-            onPressed: () => context.push('/listings/create'), // ✅ GoRouter
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Listings')),
       body: RefreshIndicator(
         onRefresh: _load,
-        child: _loading && _items.isEmpty
+        child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : ListView.builder(
-                itemCount: _items.length,
-                itemBuilder: (c, i) {
-                  final it = _items[i];
-                  final title = (it['title'] ?? 'Item').toString();
-                  final price = ((it['price_cents'] ?? 0) as num) / 100.0;
-                  final photos = (it['photos'] as List?)?.cast<Map>() ?? const [];
-                  final img = photos.isNotEmpty ? photos.first['image_url'] as String? : null;
-                  return ListTile(
-                    leading: img != null
-                        ? CachedNetworkImage(
-                            imageUrl: img,
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.cover,
-                          )
-                        : const Icon(Icons.image_not_supported),
-                    title: Text(title),
-                    subtitle: Text('COP ${price.toStringAsFixed(0)}'),
-                  );
-                },
-              ),
+            : _err != null
+                ? ListView(children: [Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(_err!, style: const TextStyle(color: Colors.red)),
+                  )])
+                : ListView.separated(
+                    itemCount: _items.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final it = _items[i];
+                      final title = (it['title'] ?? '').toString();
+
+                      // 👇 price_cents (int) → pesos (int)
+                      final cents = (it['price_cents'] ?? 0) as int;
+                      final price = cents ~/ 100;
+
+                      return ListTile(
+                        title: Text(title),
+                        subtitle: Text('\$ $price'),
+                      );
+                    },
+                  ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/listings/create'),
+        label: const Text('Publicar'),
+        icon: const Icon(Icons.add),
       ),
     );
   }
