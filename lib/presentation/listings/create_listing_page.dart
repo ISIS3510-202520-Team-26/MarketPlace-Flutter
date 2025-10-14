@@ -1,3 +1,4 @@
+// lib/presentation/listings/create_listing_page.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../data/api/listings_api.dart';
 import '../../data/api/images_api.dart';
 import '../../data/api/catalog_api.dart';
+import '../../core/telemetry/telemetry.dart';
 
 class CreateListingPage extends StatefulWidget {
   const CreateListingPage({super.key});
@@ -46,6 +48,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
     super.initState();
     _initLocation();
     _loadCategories();
+    Telemetry.i.view('create_listing'); // <- Telemetría: pantalla
   }
 
   // ---------- Helpers ----------
@@ -216,7 +219,10 @@ class _CreateListingPageState extends State<CreateListingPage> {
               _pillButton(
                 icon: Icons.photo_camera_outlined,
                 label: 'Cámara/Galería',
-                onTap: _pick,
+                onTap: () {
+                  Telemetry.i.click('pick_image');
+                  _pick();
+                },
               ),
               const SizedBox(width: 12),
               if (_picked != null)
@@ -251,6 +257,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
               return DropdownMenuItem(value: id, child: Text(name));
             }).toList(),
             onChanged: _catsBusy ? null : (v) {
+              Telemetry.i.click('change_category', props: {'category_id': v});
               setState(() => _categoryId = v);
               if (v != null) _loadBrandsForCategory(v);
             },
@@ -258,7 +265,10 @@ class _CreateListingPageState extends State<CreateListingPage> {
               suffixIcon: IconButton(
                 tooltip: 'Crear categoría',
                 icon: const Icon(Icons.add_circle_outline, color: _primary),
-                onPressed: _catsBusy ? null : _createCategoryDialog,
+                onPressed: _catsBusy ? null : () async {
+                  Telemetry.i.click('open_create_category');
+                  await _createCategoryDialog();
+                },
               ),
             ),
           ),
@@ -274,12 +284,18 @@ class _CreateListingPageState extends State<CreateListingPage> {
                   final name = (b['name'] ?? '').toString();
                   return DropdownMenuItem(value: id, child: Text(name));
                 }).toList(),
-                onChanged: (v) => setState(() => _brandId = v),
+                onChanged: (v) {
+                  Telemetry.i.click('change_brand', props: {'brand_id': v});
+                  setState(() => _brandId = v);
+                },
                 decoration: _inputDecoration('Marca').copyWith(
                   suffixIcon: IconButton(
                     tooltip: 'Crear marca',
                     icon: const Icon(Icons.add_circle_outline, color: _primary),
-                    onPressed: _brandsBusy ? null : _createBrandDialog,
+                    onPressed: _brandsBusy ? null : () async {
+                      Telemetry.i.click('open_create_brand');
+                      await _createBrandDialog();
+                    },
                   ),
                 ),
               ),
@@ -304,6 +320,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 SwitchListTile(
                   value: _useLocation,
                   onChanged: (v) {
+                    Telemetry.i.click('toggle_location', props: {'enabled': v});
                     setState(() => _useLocation = v);
                     if (v) _initLocation();
                   },
@@ -319,12 +336,18 @@ class _CreateListingPageState extends State<CreateListingPage> {
                     Text(coordsText, style: const TextStyle(fontSize: 12)),
                     const SizedBox(width: 8),
                     IconButton(
-                      onPressed: _locBusy ? null : _initLocation,
+                      onPressed: _locBusy ? null : () {
+                        Telemetry.i.click('refresh_location');
+                        _initLocation();
+                      },
                       tooltip: 'Reintentar',
                       icon: const Icon(Icons.my_location, size: 20, color: _primary),
                     ),
                     TextButton(
-                      onPressed: () => Geolocator.openLocationSettings(),
+                      onPressed: () {
+                        Telemetry.i.click('open_location_settings');
+                        Geolocator.openLocationSettings();
+                      },
                       child: const Text('Ajustes de ubicación'),
                     ),
                   ],
@@ -336,7 +359,10 @@ class _CreateListingPageState extends State<CreateListingPage> {
           const SizedBox(height: 24),
           _primaryButton(
             text: _busy ? 'Subiendo…' : 'Publicar',
-            onTap: _busy ? null : _submit,
+            onTap: _busy ? null : () {
+              Telemetry.i.click('publish');
+              _submit();
+            },
           ),
           if (_status != null)
             Padding(
@@ -461,6 +487,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
         _categories = next;
         _categoryId = newId;
       });
+      Telemetry.i.click('create_category', props: {'name': name, 'category_id': newId});
       await _loadBrandsForCategory(newId);
     } catch (e) {
       setState(() => _err = 'No se pudo crear la categoría: $e');
@@ -530,6 +557,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
       await _loadBrandsForCategory(selectedCat!);
 
       setState(() => _brandId = brand['id'] as String);
+      Telemetry.i.click('create_brand', props: {'name': name, 'brand_id': _brandId, 'category_id': selectedCat});
     } catch (e) {
       setState(() => _err = 'No se pudo crear la marca: $e');
     } finally {

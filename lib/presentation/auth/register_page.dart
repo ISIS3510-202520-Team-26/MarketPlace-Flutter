@@ -1,6 +1,9 @@
+// lib/presentation/auth/register_page.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../data/api/auth_api.dart';
+import '../../core/telemetry/telemetry.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -9,254 +12,219 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
+  static const _primary = Color(0xFF0F6E5D);
+
   final _name = TextEditingController();
   final _email = TextEditingController();
-  final _pass = TextEditingController();
+  final _password = TextEditingController();
   final _campus = TextEditingController();
-  bool _loading = false;
+
+  bool _busy = false;
+  bool _showPass = false;
   String? _err;
-  bool _hidePass = true;
 
-  // Colores inspirados en la vista
-  static const Color _bg = Color(0xFFF1EEF3);      // fondo exterior
-  static const Color _panel = Color(0xFFE9E3EA);   // tarjeta suave
-  static const Color _green = Color(0xFF0E4F3F);   // botón / títulos
-  static const Color _hint = Color(0xFF9BA0A5);    // placehoders
+  @override
+  void initState() {
+    super.initState();
+    Telemetry.i.view('register');
+  }
 
-  InputDecoration _pillDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: _hint, fontSize: 16),
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(28),
-        borderSide: const BorderSide(color: Colors.transparent),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(28),
-        borderSide: BorderSide(color: _green.withOpacity(0.5), width: 1.2),
-      ),
-    );
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _password.dispose();
+    _campus.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bg,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
-                decoration: BoxDecoration(
-                  color: _panel,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Título
-                    const Text(
-                      '¡Hola! Regístrate para\nempezar.',
-                      style: TextStyle(
-                        color: _green,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-
-                    // Campos
-                    TextField(
-                      controller: _name,
-                      textInputAction: TextInputAction.next,
-                      decoration: _pillDecoration('Nombre completo'),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      decoration: _pillDecoration('Email'),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _pass,
-                      obscureText: _hidePass,
-                      textInputAction: TextInputAction.done,
-                      decoration: _pillDecoration('Password (mín. 6)').copyWith(
-                        suffixIcon: IconButton(
-                          onPressed: () => setState(() => _hidePass = !_hidePass),
-                          icon: Icon(_hidePass ? Icons.visibility_off : Icons.visibility),
-                          color: _hint,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _campus,
-                      decoration: _pillDecoration('Campus (opcional)'),
-                    ),
-
-                    // Error
-                    if (_err != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        _err!,
-                        style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-
-                    const SizedBox(height: 16),
-
-                    // Botón principal
-                    SizedBox(
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _loading ? null : _submit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _green,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(28),
-                          ),
-                          textStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        child: Text(_loading ? 'Creando…' : 'Registrarme'),
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    // Separador "O registrarse con"
-                    Row(
-                      children: [
-                        const Expanded(child: Divider(height: 1, color: Color(0xFFDBD7DE))),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Text('O regístrate con',
-                              style: TextStyle(color: Colors.grey.shade700)),
-                        ),
-                        const Expanded(child: Divider(height: 1, color: Color(0xFFDBD7DE))),
-                      ],
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Botones sociales (solo UI / placeholders)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: const [
-                        _SocialBox(label: 'f'),
-                        _SocialBox(label: 'G'),
-                        _SocialBox(label: 'A'),
-                      ],
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    // Link "Ya tengo cuenta"
-                    Center(
-                      child: Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text('¿Ya tienes cuenta? ',
-                              style: TextStyle(color: Colors.grey.shade700)),
-                          InkWell(
-                            onTap: _loading
-                                ? null
-                                : () {
-                                    if (context.canPop()) {
-                                      context.pop();
-                                    } else {
-                                      context.go('/login'); // evita “There is nothing to pop”
-                                    }
-                                  },
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                              child: Text(
-                                'Iniciar sesión',
-                                style: TextStyle(
-                                  color: _green,
-                                  fontWeight: FontWeight.w800,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text(
+          'Registro',
+          style: TextStyle(
+            color: _primary,
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
           ),
         ),
       ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          if (_err != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(_err!, style: const TextStyle(color: Colors.red)),
+            ),
+
+          _textField(controller: _name, label: 'Nombre', hint: 'Tu nombre'),
+          const SizedBox(height: 12),
+          _textField(
+            controller: _email,
+            label: 'Email',
+            hint: 't@uniandes.edu.co',
+            keyboardType: TextInputType.emailAddress,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _password,
+            obscureText: !_showPass,
+            decoration: _inputDecoration('Contraseña', hint: 'Mínimo 8 caracteres').copyWith(
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() => _showPass = !_showPass);
+                  Telemetry.i.click('toggle_password', props: {'visible': _showPass});
+                },
+                icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility, color: _primary),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _textField(
+            controller: _campus,
+            label: 'Campus (opcional)',
+            hint: 'Universidad de los Andes',
+          ),
+
+          const SizedBox(height: 24),
+          _primaryButton(
+            text: _busy ? 'Creando cuenta…' : 'Registrarme',
+            onTap: _busy ? null : _submit,
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () {
+              Telemetry.i.click('go_to_login');
+              context.push('/login');
+            },
+            child: const Text('¿Ya tienes cuenta? Inicia sesión'),
+          ),
+        ],
+      ),
     );
   }
 
-  // =======================
-  // LÓGICA: SIN CAMBIOS
-  // =======================
   Future<void> _submit() async {
     final name = _name.text.trim();
-    final email = _email.text.trim();
-    final pass = _pass.text;
-    final campus = _campus.text.trim().isEmpty ? null : _campus.text.trim();
+    final email = _email.text.trim().toLowerCase();
+    final pass = _password.text;
+    final campus = _campus.text.trim();
 
-    if (name.isEmpty || email.isEmpty || pass.length < 6) {
-      setState(() => _err = 'Completa nombre, email y una contraseña de 6+ caracteres.');
+    // Validaciones locales alineadas con el backend
+    final errors = <String>[];
+    if (name.length < 2) errors.add('Nombre: mínimo 2 caracteres.');
+    if (!_isValidEmail(email)) errors.add('Email no válido.');
+    if (pass.length < 8) errors.add('Contraseña: mínimo 8 caracteres.');
+    if (errors.isNotEmpty) {
+      Telemetry.i.click('register_validation_failed', props: {'n': errors.length});
+      setState(() => _err = errors.join('\n'));
       return;
     }
 
+    FocusScope.of(context).unfocus();
     setState(() {
-      _loading = true;
+      _busy = true;
       _err = null;
     });
 
-    final api = AuthApi();
+    Telemetry.i.click('register_submit', props: {
+      'email_domain': _emailDomain(email),
+      if (campus.isNotEmpty) 'campus': campus,
+    });
+
     try {
-      await api.register(name: name, email: email, password: pass, campus: campus);
-      await api.login(email: email, password: pass); // login automático
-      if (mounted) context.go('/'); // entra al Home
+      await AuthApi().register(
+        name: name,
+        email: email,
+        password: pass,
+        campus: campus.isEmpty ? null : campus,
+      );
+
+      Telemetry.i.click('register_result', props: {'ok': true});
+      await Telemetry.i.flush();
+
+      if (mounted) {
+        // Si tu backend no hace autologin, manda al login:
+        context.go('/login');
+      }
     } catch (e) {
-      setState(() => _err = '$e');
+      Telemetry.i.click('register_result', props: {'ok': false});
+      setState(() => _err = 'No se pudo registrar: $e');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
-}
 
-class _SocialBox extends StatelessWidget {
-  const _SocialBox({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 72,
-      height: 56,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE3DEE6)),
+  // ---------- UI helpers ----------
+  InputDecoration _inputDecoration(String label, {String? hint}) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      floatingLabelStyle: const TextStyle(color: _primary, fontWeight: FontWeight.w600),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: _RegisterPageState._green),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderSide: BorderSide(color: _primary, width: 1.6),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    );
+  }
+
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    TextInputType? keyboardType,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: _inputDecoration(label, hint: hint),
+    );
+  }
+
+  Widget _primaryButton({required String text, VoidCallback? onTap}) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
       ),
     );
+  }
+
+  // ---------- helpers validación ----------
+  bool _isValidEmail(String s) {
+    // Simple y suficiente para el backend
+    final re = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    return re.hasMatch(s);
+  }
+
+  String? _emailDomain(String s) {
+    final i = s.indexOf('@');
+    return i > 0 ? s.substring(i + 1) : null;
   }
 }
