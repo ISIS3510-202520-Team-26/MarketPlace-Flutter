@@ -1,12 +1,9 @@
+// lib/presentation/auth/login_page.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../../data/api/auth_api.dart';
 
-// Colores (mismos de Register)
-const Color kBg    = Color(0xFFF1EEF3);
-const Color kPanel = Color(0xFFE9E3EA);
-const Color kGreen = Color(0xFF0E4F3F);
-const Color kHint  = Color(0xFF9BA0A5);
+import '../../data/api/auth_api.dart';
+import '../../core/telemetry/telemetry.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -15,207 +12,195 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _email = TextEditingController();
-  final _pass = TextEditingController();
-  bool _loading = false;
-  String? _err;
-  bool _hidePass = true;
+  static const _primary = Color(0xFF0F6E5D);
 
-  InputDecoration _pillDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: kHint, fontSize: 16),
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(28),
-        borderSide: const BorderSide(color: Colors.transparent),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(28),
-        borderSide: const BorderSide(color: kGreen, width: 1.2),
-      ),
-    );
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+
+  bool _busy = false;
+  bool _showPass = false;
+  String? _err;
+
+  @override
+  void initState() {
+    super.initState();
+    Telemetry.i.view('login');
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBg,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
-                decoration: BoxDecoration(
-                  color: kPanel,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'Welcome! Login to\nTech Market.',
-                      style: TextStyle(
-                        color: kGreen,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-
-                    TextField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      decoration: _pillDecoration('Enter your email'),
-                    ),
-                    const SizedBox(height: 14),
-
-                    TextField(
-                      controller: _pass,
-                      obscureText: _hidePass,
-                      textInputAction: TextInputAction.done,
-                      decoration: _pillDecoration('Enter your password').copyWith(
-                        suffixIcon: IconButton(
-                          onPressed: () => setState(() => _hidePass = !_hidePass),
-                          icon: Icon(_hidePass ? Icons.visibility_off : Icons.visibility),
-                          color: kHint,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: _loading ? null : () {}, // solo UI
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.grey.shade600,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                        ),
-                        child: const Text('Forgot Password?'),
-                      ),
-                    ),
-
-                    if (_err != null) ...[
-                      Text(_err!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 6),
-                    ],
-
-                    SizedBox(
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _loading ? null : _submit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kGreen,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(28),
-                          ),
-                          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                        ),
-                        child: Text(_loading ? '...' : 'Login'),
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        const Expanded(child: Divider(height: 1, color: Color(0xFFDBD7DE))),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Text('Or Login with', style: TextStyle(color: Colors.grey.shade700)),
-                        ),
-                        const Expanded(child: Divider(height: 1, color: Color(0xFFDBD7DE))),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: const [
-                        _SocialBox(label: 'f'),
-                        _SocialBox(label: 'G'),
-                        _SocialBox(label: 'X'),
-                      ],
-                    ),
-
-                    const SizedBox(height: 18),
-                    Center(
-                      child: Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text("Don't have an account? ",
-                              style: TextStyle(color: Colors.grey.shade700)),
-                          InkWell(
-                            onTap: _loading ? null : () => context.push('/register'),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                              child: Text(
-                                'Register Now',
-                                style: TextStyle(
-                                  color: kGreen,
-                                  fontWeight: FontWeight.w800,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text(
+          'Iniciar sesión',
+          style: TextStyle(
+            color: _primary,
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
           ),
         ),
       ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          if (_err != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(_err!, style: const TextStyle(color: Colors.red)),
+            ),
+
+          _textField(
+            controller: _email,
+            label: 'Email',
+            hint: 't@uniandes.edu.co',
+            keyboardType: TextInputType.emailAddress,
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _password,
+            obscureText: !_showPass,
+            onSubmitted: (_) => _submit(),
+            decoration: _inputDecoration('Contraseña', hint: 'Mínimo 8 caracteres').copyWith(
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() => _showPass = !_showPass);
+                  Telemetry.i.click('toggle_password', props: {'visible': _showPass});
+                },
+                icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility, color: _primary),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 24),
+          _primaryButton(
+            text: _busy ? 'Entrando…' : 'Entrar',
+            onTap: _busy ? null : _submit,
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () {
+              Telemetry.i.click('go_to_register');
+              context.push('/register');
+            },
+            child: const Text('¿No tienes cuenta? Crear cuenta'),
+          ),
+        ],
+      ),
     );
   }
 
-  // ======= LÓGICA: igual que la tuya =======
   Future<void> _submit() async {
+    final email = _email.text.trim().toLowerCase();
+    final pass = _password.text;
+
+    // Validaciones locales para evitar 422 innecesarios
+    final errors = <String>[];
+    if (!_isValidEmail(email)) errors.add('Email no válido.');
+    if (pass.length < 8) errors.add('Contraseña: mínimo 8 caracteres.');
+    if (errors.isNotEmpty) {
+      Telemetry.i.click('login_validation_failed', props: {'n': errors.length});
+      setState(() => _err = errors.join('\n'));
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
     setState(() {
-      _loading = true;
+      _busy = true;
       _err = null;
     });
+
+    Telemetry.i.click('login_submit', props: {'email_domain': _emailDomain(email)});
+
     try {
-      await AuthApi().login(email: _email.text.trim(), password: _pass.text);
-      if (mounted) context.go('/');
+      await AuthApi().login(email: email, password: pass);
+      Telemetry.i.click('login_result', props: {'ok': true});
+      await Telemetry.i.flush();
+      if (mounted) context.go('/'); // Home
     } catch (e) {
-      setState(() => _err = '$e');
+      Telemetry.i.click('login_result', props: {'ok': false});
+      setState(() => _err = 'No se pudo iniciar sesión: $e');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
-}
 
-class _SocialBox extends StatelessWidget {
-  const _SocialBox({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 72,
-      height: 56,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE3DEE6)),
+  // ---------- UI helpers ----------
+  InputDecoration _inputDecoration(String label, {String? hint}) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      floatingLabelStyle: const TextStyle(color: _primary, fontWeight: FontWeight.w600),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: kGreen),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderSide: BorderSide(color: _primary, width: 1.6),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    );
+  }
+
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    TextInputType? keyboardType,
+    void Function(String)? onSubmitted,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      textInputAction: TextInputAction.next,
+      onSubmitted: onSubmitted,
+      decoration: _inputDecoration(label, hint: hint),
+    );
+  }
+
+  Widget _primaryButton({required String text, VoidCallback? onTap}) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
       ),
     );
   }
+
+  // ---------- helpers ----------
+  bool _isValidEmail(String s) {
+    final re = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    return re.hasMatch(s);
+  }
+
+  String? _emailDomain(String s) {
+    final i = s.indexOf('@');
+    return i > 0 ? s.substring(i + 1) : null;
+    }
 }

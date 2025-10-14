@@ -1,3 +1,4 @@
+// lib/presentation/home/home_page.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/api/listings_api.dart';
 import '../../data/api/catalog_api.dart';
 import '../../data/api/images_api.dart';
+import '../../core/telemetry/telemetry.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -40,6 +42,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _bootstrap();
     _searchCtrl.addListener(_onSearchChanged);
+    Telemetry.i.view('home'); // <- Telemetría: pantalla
   }
 
   @override
@@ -115,7 +118,18 @@ class _HomePageState extends State<HomePage> {
   // -------------------- Search & Filters --------------------
   void _onSearchChanged() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 250), _applyFilters);
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      _applyFilters();
+      // Telemetría debounced (solo si hay algo que buscar o cambió categoría)
+      final q = _searchCtrl.text.trim();
+      if (q.isNotEmpty || _selectedCategoryId != null) {
+        Telemetry.i.searchPerformed(
+          q: q.isEmpty ? null : q,
+          categoryId: _selectedCategoryId,
+          results: _items.length,
+        );
+      }
+    });
   }
 
   void _applyFilters() {
@@ -187,13 +201,19 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         actions: [
-          _circleIcon(icon: Icons.search, onTap: _openSearchSheet),
+          _circleIcon(icon: Icons.search, onTap: () {
+            Telemetry.i.click('open_search');
+            _openSearchSheet();
+          }),
           const SizedBox(width: 8),
           _circleIcon(
             icon: Icons.shopping_cart_outlined,
-            onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Cart no implementado aún')),
-            ),
+            onTap: () {
+              Telemetry.i.click('cart_icon');
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Cart no implementado aún')),
+              );
+            },
           ),
           const SizedBox(width: 12),
         ],
@@ -224,14 +244,17 @@ class _HomePageState extends State<HomePage> {
                           child: Center(child: Text('Sin resultados')),
                         )
                       else
-                        _buildGrid(), // <— sin overflow
+                        _buildGrid(),
                       const SizedBox(height: 24),
                     ],
                   ),
       ),
 
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/listings/create'),
+        onPressed: () {
+          Telemetry.i.click('fab_publish');
+          context.push('/listings/create');
+        },
         label: const Text('Publicar'),
         icon: const Icon(Icons.add),
         backgroundColor: _primary,
@@ -288,6 +311,13 @@ class _HomePageState extends State<HomePage> {
                 textInputAction: TextInputAction.search,
                 onSubmitted: (_) {
                   _applyFilters();
+                  // Telemetría: submit explícito
+                  final q = _searchCtrl.text.trim();
+                  Telemetry.i.searchPerformed(
+                    q: q.isEmpty ? null : q,
+                    categoryId: _selectedCategoryId,
+                    results: _items.length,
+                  );
                   Navigator.pop(context);
                 },
               ),
@@ -312,9 +342,12 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         GestureDetector(
-          onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Filter no implementado aún')),
-          ),
+          onTap: () {
+            Telemetry.i.click('filter');
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Filter no implementado aún')),
+            );
+          },
           child: Text(
             'Filter',
             style: TextStyle(
@@ -329,7 +362,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildCategoryChips() {
     final chips = <Widget>[
-      _categoryChip(label: 'Technology', id: null, selected: _selectedCategoryId == null),
+      _categoryChip(label: 'All categories', id: null, selected: _selectedCategoryId == null),
       for (final c in _categories)
         Padding(
           padding: const EdgeInsets.only(left: 8),
@@ -354,6 +387,11 @@ class _HomePageState extends State<HomePage> {
       onSelected: (_) {
         setState(() => _selectedCategoryId = id);
         _applyFilters();
+        // Telemetría: cambio de categoría
+        Telemetry.i.click('filter_category', props: {
+          'category_id': id,
+          'selected': selected,
+        });
       },
       shape: const StadiumBorder(),
       backgroundColor: Colors.white,
@@ -369,7 +407,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // ---------- GRID sin overflow ----------
+  // ---------- GRID ----------
   Widget _buildGrid() {
     return GridView.builder(
       shrinkWrap: true,
@@ -379,14 +417,13 @@ class _HomePageState extends State<HomePage> {
         crossAxisCount: 2,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        // Altura fija generosa para evitar cualquier “bottom overflow”
-        mainAxisExtent: 300, // si tu fuente del sistema es MUY grande, sube a 310–320
+        mainAxisExtent: 300,
       ),
       itemBuilder: (context, index) => _buildListingCard(_items[index]),
     );
   }
 
-  // Tarjeta compacta tipo catálogo (ajustes de espacios)
+  // Tarjeta compacta
   Widget _buildListingCard(Map<String, dynamic> it) {
     final id = (it['id'] ?? it['uuid']).toString();
 
@@ -414,7 +451,10 @@ class _HomePageState extends State<HomePage> {
     }
 
     return InkWell(
-      onTap: () => context.push('/listings/$id'),
+      onTap: () {
+        Telemetry.i.click('listing_card', listingId: id);
+        context.push('/listings/$id');
+      },
       borderRadius: BorderRadius.circular(16),
       child: Container(
         decoration: BoxDecoration(
@@ -471,9 +511,12 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const Spacer(),
                 InkWell(
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Añadido al carrito (demo)')),
-                  ),
+                  onTap: () {
+                    Telemetry.i.click('add_to_cart', listingId: id);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Añadido al carrito (demo)')),
+                    );
+                  },
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
                     width: 28,
