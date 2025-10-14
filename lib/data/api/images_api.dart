@@ -103,4 +103,11 @@ class ImagesApi {
       return url;
     }
   }
+
+    Future<String> preview(String objectKey) async {
+    final res = await _dio.get('/images/preview', queryParameters: {
+      'object_key': objectKey,
+    });
+    return (res.data as Map)['preview_url'] as String;
+  }
 }
