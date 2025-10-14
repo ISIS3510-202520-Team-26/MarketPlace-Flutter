@@ -1,0 +1,51 @@
+name: market_app
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Navegación
+  go_router: ^14.2.0
+
+  # Red & cache
+  dio: ^5.9.0
+  dio_cache_interceptor: ^3.4.4
+  dio_cache_interceptor_hive_store: ^3.2.2
+
+  # Almacenamiento/seguridad
+  flutter_secure_storage: ^9.2.4
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  uuid: ^4.5.1
+
+  # Conectividad y sensores
+  connectivity_plus: ^7.0.0
+  geolocator: ^14.0.2
+  image_picker: ^1.2.0
+  flutter_image_compress: ^2.3.0
+
+  # UI / media
+  cached_network_image: ^3.4.1
+
+  # Contactos (si lo usas)
+  flutter_contacts: ^1.1.7
+
+  # i18n (alineado con Flutter SDK)
+  flutter_localizations:
+    sdk: flutter
+  intl: 0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.7.1
+
+flutter:
+  uses-material-design: true
