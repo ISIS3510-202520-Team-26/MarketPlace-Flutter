@@ -1,57 +1,63 @@
 // lib/core/telemetry/telemetry.dart
 import 'dart:async';
-
 import '../../data/api/telemetry_api.dart';
 
-/// Pequeño helper para encolar eventos y enviarlos en batch.
-/// - No cambia el UI.
-/// - Encola y hace flush periódico o cuando supera 20 elementos.
 class Telemetry {
   Telemetry._();
   static final Telemetry i = Telemetry._();
 
-  final TelemetryApi _api = TelemetryApi();
-
-  final List<Map<String, dynamic>> _queue = <Map<String, dynamic>>[];
+  final _api = TelemetryApi();
+  final List<Map<String, dynamic>> _buf = [];
   Timer? _timer;
-  bool _sending = false;
 
-  void _ensureTimer() {
-    _timer ??= Timer.periodic(const Duration(seconds: 15), (_) => flush());
-  }
-
-  void dispose() {
-    _timer?.cancel();
-    _timer = null;
-  }
+  static const int _maxBatch = 20;
+  static const Duration _maxDelay = Duration(seconds: 2);
 
   void _enqueue(Map<String, dynamic> ev) {
-    _queue.add(ev);
-    if (_queue.length >= 20) {
-      // umbral de envío inmediato
-      unawaited();
+    _buf.add(ev);
+    _scheduleFlush();
+    if (_buf.length >= _maxBatch) {
+      _flush();
     }
-    _ensureTimer();
   }
 
-  Future<void> flush() async {
-    if (_sending || _queue.isEmpty) return;
-    _sending = true;
-    final batch = List<Map<String, dynamic>>.from(_queue);
-    _queue.clear();
+  void _scheduleFlush() {
+    _timer?.cancel();
+    _timer = Timer(_maxDelay, _flush);
+  }
+
+  Future<void> _flush() async {
+    if (_buf.isEmpty) return;
+    final batch = List<Map<String, dynamic>>.from(_buf);
+    _buf.clear();
+    _timer?.cancel();
+    _timer = null;
+
     try {
       await _api.sendBatch(batch);
     } catch (_) {
-      // Reencolar el batch fallido para reintento
-      _queue.insertAll(0, batch);
-    } finally {
-      _sending = false;
+      // Best-effort: si falla, reinsertamos (limitamos para no crecer infinito)
+      _buf.insertAll(0, batch.take(200));
     }
   }
 
-  // --------- Eventos de conveniencia ---------
+  /// Forzar envío inmediato (por ejemplo, al cerrar sesión).
+  Future<void> flush() => _flush();
 
-  /// ui.click con propiedades {button: <name>}
+  // ----------------- Eventos públicos -----------------
+
+  /// Vista de pantalla
+  void view(String screen, {Map<String, dynamic>? props}) {
+    _enqueue({
+      'event_type': 'screen.view',
+      'properties': {
+        'screen': screen,
+        if (props != null) ...props,
+      },
+    });
+  }
+
+  /// Click genérico de UI
   void click(
     String button, {
     String? listingId,
@@ -59,63 +65,49 @@ class Telemetry {
     String? chatId,
     Map<String, dynamic>? props,
   }) {
-    final p = <String, dynamic>{'button': button};
-    if (props != null) p.addAll(props);
-
-    final ev = <String, dynamic>{
+    _enqueue({
       'event_type': 'ui.click',
-      'properties': p,
-    };
-    if (listingId != null) ev['listing_id'] = listingId;
-    if (orderId != null) ev['order_id'] = orderId;
-    if (chatId != null) ev['chat_id'] = chatId;
-
-    _enqueue(ev);
+      if (listingId != null) 'listing_id': listingId,
+      if (orderId != null) 'order_id': orderId,
+      if (chatId != null) 'chat_id': chatId,
+      'properties': {
+        'button': button,
+        if (props != null) ...props,
+      },
+    });
   }
 
-  /// feature.used con propiedades {feature_key: <key>}
-  void featureUsed(
-    String featureKey, {
-    String? listingId,
-    Map<String, dynamic>? props,
-  }) {
-    final p = <String, dynamic>{'feature_key': featureKey};
-    if (props != null) p.addAll(props);
-
-    final ev = <String, dynamic>{
-      'event_type': 'feature.used',
-      'properties': p,
-    };
-    if (listingId != null) ev['listing_id'] = listingId;
-
-    _enqueue(ev);
-  }
-
-  /// search.performed (BQ 2.x) – útil para búsquedas locales
+  /// Búsqueda ejecutada (para BQ 2.1)
   void searchPerformed({String? q, String? categoryId, int? results}) {
-    final p = <String, dynamic>{};
-    if (q != null) p['q'] = q;
-    if (categoryId != null) p['category_id'] = categoryId;
-    if (results != null) p['results'] = results;
-
-    _enqueue(<String, dynamic>{
+    _enqueue({
       'event_type': 'search.performed',
-      'properties': p,
+      'properties': {
+        if (q != null && q.isNotEmpty) 'q': q,
+        if (categoryId != null) 'category_id': categoryId,
+        if (results != null) 'results': results,
+      },
     });
   }
 
-  /// screen.view (libre; útil para funnels)
-  void view(String screen, {Map<String, dynamic>? props}) {
-    final p = <String, dynamic>{'screen': screen};
-    if (props != null) p.addAll(props);
-    _enqueue(<String, dynamic>{
-      'event_type': 'screen.view',
-      'properties': p,
+  /// Filtro realmente aplicado (para BQ 2.2)
+  /// filter: 'category' | 'brand' | 'price' | 'availability' | ...
+  /// value: valor textual (p.ej. 'laptops' o '0-500k')
+  void filterUsed({required String filter, String? value}) {
+    _enqueue({
+      'event_type': 'search.filter.used',
+      'properties': {
+        'filter': filter,
+        if (value != null) 'value': value,
+      },
     });
   }
-}
 
-// ignore: avoid_classes_with_only_static_members
-class unawaited {
-  static void call(Future<void> f) {}
+  /// Paso de checkout (por si haces el funnel detallado)
+  void checkoutStep(String step, {Map<String, dynamic>? props}) {
+    _enqueue({
+      'event_type': 'checkout.step',
+      'step': step,
+      'properties': props ?? const {},
+    });
+  }
 }
