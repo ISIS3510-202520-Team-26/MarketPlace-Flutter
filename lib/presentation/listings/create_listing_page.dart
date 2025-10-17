@@ -1,4 +1,3 @@
-// lib/presentation/listings/create_listing_page.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -48,7 +47,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
     super.initState();
     _initLocation();
     _loadCategories();
-    Telemetry.i.view('create_listing'); // <- Telemetría: pantalla
+    Telemetry.i.view('create_listing'); // Telemetría: pantalla
   }
 
   // ---------- Helpers ----------
