@@ -18,9 +18,10 @@ late Dio dio;
 Future<void> init({required String cachePath}) async {
 final options = BaseOptions(
 baseUrl: Env.baseUrl,
-connectTimeout: const Duration(seconds: 10),
-receiveTimeout: const Duration(seconds: 20),
+connectTimeout: const Duration(seconds: 30), // Aumentado para AWS
+receiveTimeout: const Duration(seconds: 30),
 headers: {'Accept': 'application/json'},
+validateStatus: (status) => status != null && status < 500, // Aceptar errores 4xx
 );
 
 
