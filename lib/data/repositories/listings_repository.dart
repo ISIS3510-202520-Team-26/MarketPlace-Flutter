@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import '../models/listing.dart';
 import '../models/listing_photo.dart';
+import '../models/price_suggestion.dart';
 import '../../core/net/dio_client.dart';
 
 /// Repository para el dominio de Listings
@@ -141,32 +142,51 @@ class ListingsRepository {
 
   /// Obtiene sugerencia de precio para un listing
   /// 
-  /// Basado en el servicio suggest_price_cents del backend
-  /// que calcula la mediana de precios de listings similares
-  Future<int?> suggestPrice({
+  /// Soporta múltiples estrategias:
+  /// - local_median: mediana de listings similares (últimos 90 días)
+  /// - prior_only: priors basados en categoría/marca
+  /// - prior+local_mix: mezcla ponderada de priors + datos locales
+  /// - msrp_heuristic: depreciación desde MSRP
+  /// - hardcoded_fallback: valor por defecto
+  /// 
+  /// Retorna PriceSuggestion con precio sugerido + metadatos (p25/p50/p75/n/source)
+  Future<PriceSuggestion?> suggestPrice({
     required String categoryId,
     String? brandId,
+    String? condition,
+    int? msrpCents,
+    int? monthsSinceRelease,
+    int? roundingQuantum,
   }) async {
     try {
       final queryParams = <String, dynamic>{
         'category_id': categoryId,
       };
-      if (brandId != null) {
-        queryParams['brand_id'] = brandId;
-      }
+      if (brandId != null) queryParams['brand_id'] = brandId;
+      if (condition != null) queryParams['condition'] = condition;
+      if (msrpCents != null) queryParams['msrp_cents'] = msrpCents;
+      if (monthsSinceRelease != null) queryParams['months_since_release'] = monthsSinceRelease;
+      if (roundingQuantum != null) queryParams['rounding_quantum'] = roundingQuantum;
+      
+      print('[ListingsRepo] Solicitando sugerencia de precio:');
+      print('  category_id: $categoryId, brand_id: $brandId');
       
       final response = await _dio.get(
-        '/listings/suggest-price',
+        '/price-suggestions/suggest',
         queryParameters: queryParams,
       );
       
-      if (response.data is Map && response.data['suggested_price_cents'] != null) {
-        return response.data['suggested_price_cents'] as int;
+      if (response.data is Map) {
+        final suggestion = PriceSuggestion.fromJson(response.data as Map<String, dynamic>);
+        print('[ListingsRepo] Sugerencia: \$${suggestion.suggestedPrice} (${suggestion.algorithm}, n=${suggestion.n})');
+        return suggestion;
       }
       
       return null;
     } on DioException catch (e) {
-      // Si no hay datos suficientes, el backend puede retornar null o 404
+      print('[ListingsRepo] Error: ${e.response?.statusCode} - ${e.response?.data}');
+      
+      // Si no hay datos suficientes, el backend retorna 404
       if (e.response?.statusCode == 404) {
         return null;
       }
@@ -348,8 +368,8 @@ class ListingsRepository {
       };
       
       if (internalHosts.contains(host)) {
-        // 10.0.2.2 es el localhost del host desde el emulador Android
-        final fixed = uri.replace(host: '10.0.2.2');
+        // IP pública de AWS para producción
+        final fixed = uri.replace(host: '3.19.208.242');
         return fixed.toString();
       }
       

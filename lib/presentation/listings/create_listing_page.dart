@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../data/repositories/listings_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../data/models/listing.dart';
+import '../../data/models/price_suggestion.dart';
 import '../../core/telemetry/telemetry.dart';
 
 class CreateListingPage extends StatefulWidget {
@@ -46,12 +47,26 @@ class _CreateListingPageState extends State<CreateListingPage> {
   String? _categoryId;
   String? _brandId;
 
+  // Price Suggestion
+  PriceSuggestion? _priceSuggestion;
+  bool _priceSuggestionApplied = false;
+  bool _priceSuggestionBusy = false;
+
   @override
   void initState() {
     super.initState();
+    _price.addListener(_onPriceChanged);
     _initLocation();
     _loadCategories();
     Telemetry.i.view('create_listing'); // Telemetría: pantalla
+  }
+
+  @override
+  void dispose() {
+    _price.removeListener(_onPriceChanged);
+    _title.dispose();
+    _price.dispose();
+    super.dispose();
   }
 
   // ---------- Helpers ----------
@@ -64,6 +79,68 @@ class _CreateListingPageState extends State<CreateListingPage> {
       if (seen.add(id)) out.add(m);
     }
     return out;
+  }
+
+  String _formatMoney(int cents) {
+    final units = cents ~/ 100;
+    return '\$${units.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} COP';
+  }
+
+  void _onPriceChanged() {
+    // Si el usuario edita manualmente el precio, marcamos que no usó la sugerencia
+    if (_priceSuggestionApplied) {
+      setState(() => _priceSuggestionApplied = false);
+    }
+  }
+
+  Future<void> _maybeSuggestPrice() async {
+    if (_categoryId == null) return;
+    
+    setState(() {
+      _priceSuggestionBusy = true;
+      _priceSuggestion = null;
+    });
+
+    try {
+      final suggestion = await _listingsRepo.suggestPrice(
+        categoryId: _categoryId!,
+        brandId: _brandId,
+      );
+      
+      if (mounted) {
+        setState(() => _priceSuggestion = suggestion);
+        if (suggestion != null) {
+          Telemetry.i.click('price_suggestion_shown', props: {
+            'category_id': _categoryId,
+            'brand_id': _brandId,
+            'suggested_price_cents': suggestion.suggestedPriceCents,
+            'algorithm': suggestion.algorithm,
+            'n': suggestion.n,
+          });
+        }
+      }
+    } catch (e) {
+      print('[CreateListing] Error al obtener sugerencia de precio: $e');
+      // No mostramos error al usuario, simplemente no hay sugerencia
+    } finally {
+      if (mounted) setState(() => _priceSuggestionBusy = false);
+    }
+  }
+
+  void _usePriceSuggestion() {
+    if (_priceSuggestion == null) return;
+    
+    final units = _priceSuggestion!.suggestedPriceCents ~/ 100;
+    _price.text = units.toString();
+    
+    setState(() => _priceSuggestionApplied = true);
+    
+    Telemetry.i.click('use_price_suggestion', props: {
+      'category_id': _categoryId,
+      'brand_id': _brandId,
+      'suggested_price_cents': _priceSuggestion!.suggestedPriceCents,
+      'algorithm': _priceSuggestion!.algorithm,
+    });
   }
 
   // ---------------------- CARGA CAT/BRAND ----------------------
@@ -125,6 +202,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
         _brands = bs;
         _brandId = sel;
       });
+      // Sugerir precio cuando cambia la categoría
+      await _maybeSuggestPrice();
     } catch (e) {
       setState(() => _err = 'No se pudieron cargar marcas: $e');
     } finally {
@@ -226,6 +305,95 @@ class _CreateListingPageState extends State<CreateListingPage> {
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
+          const SizedBox(height: 8),
+          // Price Suggestion UI
+          if (_priceSuggestionBusy)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: LinearProgressIndicator(minHeight: 3),
+            ),
+          if (_priceSuggestion != null && !_priceSuggestionBusy)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _priceSuggestionApplied ? Colors.green.shade50 : _cardBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _priceSuggestionApplied ? Colors.green : Colors.grey.shade300,
+                  width: _priceSuggestionApplied ? 2 : 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        _priceSuggestionApplied ? Icons.check_circle : Icons.lightbulb_outline,
+                        color: _priceSuggestionApplied ? Colors.green : _primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _priceSuggestionApplied ? 'Sugerencia aplicada' : 'Precio sugerido',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: _priceSuggestionApplied ? Colors.green.shade700 : _primary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _formatMoney(_priceSuggestion!.suggestedPriceCents),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  if (_priceSuggestion!.p25 != null && _priceSuggestion!.p75 != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Rango: ${_formatMoney(_priceSuggestion!.p25!)} - ${_formatMoney(_priceSuggestion!.p75!)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Basado en ${_priceSuggestion!.n ?? 0} listings (${_priceSuggestion!.source ?? _priceSuggestion!.algorithm})',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  if (!_priceSuggestionApplied)
+                    const SizedBox(height: 12),
+                  if (!_priceSuggestionApplied)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _usePriceSuggestion,
+                        icon: const Icon(Icons.check, size: 18),
+                        label: const Text('Usar sugerencia'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _primary,
+                          side: const BorderSide(color: _primary),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           const SizedBox(height: 16),
 
           _sectionTitle('Foto'),
@@ -303,6 +471,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 onChanged: (v) {
                   Telemetry.i.click('change_brand', props: {'brand_id': v});
                   setState(() => _brandId = v);
+                  _maybeSuggestPrice();
                 },
                 decoration: _inputDecoration('Marca').copyWith(
                   suffixIcon: IconButton(
@@ -653,7 +822,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
         isActive: true, // Nuevo listing activo por defecto
         latitude: _useLocation ? _lat : null,
         longitude: _useLocation ? _lon : null,
-        priceSuggestionUsed: false,
+        priceSuggestionUsed: _priceSuggestionApplied,
         quickViewEnabled: true,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
