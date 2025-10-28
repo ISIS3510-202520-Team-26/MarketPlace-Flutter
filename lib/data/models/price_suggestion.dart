@@ -1,78 +1,113 @@
 /// Modelo de Sugerencia de Precio (PriceSuggestion)
 /// 
 /// Representa una sugerencia de precio generada para un listing.
-/// Basado en el schema del backend PostgreSQL.
+/// Soporta múltiples estrategias: local_median, prior_only, prior+local_mix,
+/// msrp_heuristic, hardcoded_fallback
 class PriceSuggestion {
-  /// ID único (UUID generado por el servidor)
-  final String id;
+  /// ID único (UUID generado por el servidor) - opcional en respuestas GET
+  final String? id;
   
-  /// ID del listing para el que se generó la sugerencia
-  final String listingId;
+  /// ID del listing para el que se generó la sugerencia - opcional
+  final String? listingId;
   
-  /// Precio sugerido en centavos
+  /// Precio sugerido en centavos (valor redondeado final)
   final int suggestedPriceCents;
   
-  /// Algoritmo usado para generar la sugerencia (máx 40 caracteres)
-  /// Ejemplos: "p50" (mediana), "p75" (percentil 75), "ml_model", "avg"
+  /// Algoritmo/estrategia usado para generar la sugerencia
+  /// Valores: local_median, prior_only, prior+local_mix, msrp_heuristic, hardcoded_fallback
   final String algorithm;
   
-  /// Fecha de creación de la sugerencia
-  final DateTime createdAt;
+  /// Fecha de creación de la sugerencia - opcional
+  final DateTime? createdAt;
+
+  // Metadatos adicionales del análisis (solo en GET/POST, no se guardan en DB)
+  final int? p25;  // Percentil 25
+  final int? p50;  // Percentil 50 (mediana)
+  final int? p75;  // Percentil 75
+  final int? n;    // Tamaño de muestra usado
+  final String? source; // Fuente de datos (normalmente igual a algorithm)
 
   const PriceSuggestion({
-    required this.id,
-    required this.listingId,
+    this.id,
+    this.listingId,
     required this.suggestedPriceCents,
     required this.algorithm,
-    required this.createdAt,
+    this.createdAt,
+    this.p25,
+    this.p50,
+    this.p75,
+    this.n,
+    this.source,
   });
 
   /// Crea una instancia desde JSON del backend
-  /// 
-  /// Maneja tanto snake_case (backend) como camelCase (legacy)
   factory PriceSuggestion.fromJson(Map<String, dynamic> json) {
     return PriceSuggestion(
-      id: (json['id'] ?? json['uuid']).toString(),
-      listingId: (json['listing_id'] ?? json['listingId']).toString(),
-      suggestedPriceCents: (json['suggested_price_cents'] ?? json['suggestedPriceCents']) as int,
-      algorithm: (json['algorithm'] as String?) ?? 'p50',
-      createdAt: DateTime.parse(json['created_at'] as String),
+      id: json['id']?.toString(),
+      listingId: json['listing_id']?.toString(),
+      suggestedPriceCents: json['suggested_price_cents'] as int,
+      algorithm: json['algorithm'] as String,
+      createdAt: json['created_at'] != null 
+          ? DateTime.parse(json['created_at'] as String)
+          : null,
+      p25: json['p25'] as int?,
+      p50: json['p50'] as int?,
+      p75: json['p75'] as int?,
+      n: json['n'] as int?,
+      source: json['source'] as String?,
     );
   }
 
   /// Convierte a JSON para crear una sugerencia
-  /// 
-  /// Usa snake_case según el schema PriceSuggestionCreate del backend
   Map<String, dynamic> toJson() {
     return {
-      'listing_id': listingId,
+      if (id != null) 'id': id,
+      if (listingId != null) 'listing_id': listingId,
       'suggested_price_cents': suggestedPriceCents,
       'algorithm': algorithm,
+      if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
+      if (p25 != null) 'p25': p25,
+      if (p50 != null) 'p50': p50,
+      if (p75 != null) 'p75': p75,
+      if (n != null) 'n': n,
+      if (source != null) 'source': source,
     };
   }
 
-  /// Precio sugerido en unidades monetarias (divide cents por 100)
+  /// Precio sugerido en unidades monetarias
   double get suggestedPrice => suggestedPriceCents / 100.0;
 
-  /// Copia la instancia con campos modificados
-  PriceSuggestion copyWith({
-    String? id,
-    String? listingId,
-    int? suggestedPriceCents,
-    String? algorithm,
-    DateTime? createdAt,
-  }) {
-    return PriceSuggestion(
-      id: id ?? this.id,
-      listingId: listingId ?? this.listingId,
-      suggestedPriceCents: suggestedPriceCents ?? this.suggestedPriceCents,
-      algorithm: algorithm ?? this.algorithm,
-      createdAt: createdAt ?? this.createdAt,
-    );
+  /// Verifica si hay rango de precios disponible (p25-p75)
+  bool get hasPriceRange => p25 != null && p75 != null;
+
+  /// Descripción legible del algoritmo usado
+  String get algorithmDescription {
+    switch (algorithm) {
+      case 'local_median':
+        return 'Basado en listings similares recientes';
+      case 'prior_only':
+        return 'Basado en históricos de categoría/marca';
+      case 'prior+local_mix':
+        return 'Mezcla de históricos + mercado actual';
+      case 'msrp_heuristic':
+        return 'Estimado desde precio sugerido (MSRP)';
+      case 'hardcoded_fallback':
+        return 'Estimación por defecto';
+      default:
+        return algorithm;
+    }
+  }
+
+  /// Nivel de confianza basado en tamaño de muestra
+  String get confidenceLevel {
+    if (n == null || n == 0) return 'Baja';
+    if (n! < 5) return 'Baja';
+    if (n! < 15) return 'Media';
+    return 'Alta';
   }
 
   @override
-  String toString() => 'PriceSuggestion(id: $id, listingId: $listingId, suggestedPrice: \$$suggestedPrice, algorithm: $algorithm)';
+  String toString() => 'PriceSuggestion(suggested: \$$suggestedPrice, algorithm: $algorithm, n: $n)';
 
   @override
   bool operator ==(Object other) =>
@@ -80,76 +115,112 @@ class PriceSuggestion {
       other is PriceSuggestion &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          listingId == other.listingId &&
           suggestedPriceCents == other.suggestedPriceCents &&
-          algorithm == other.algorithm &&
-          createdAt == other.createdAt;
+          algorithm == other.algorithm;
 
   @override
-  int get hashCode => Object.hash(id, listingId, suggestedPriceCents, algorithm, createdAt);
+  int get hashCode => Object.hash(id, suggestedPriceCents, algorithm);
 }
 
 /// Request para solicitar sugerencia de precio
 /// 
-/// Según el schema SuggestQuery del backend
+/// Soporta parámetros opcionales para condición, MSRP y depreciación
 class PriceSuggestionRequest {
-  final String? categoryId;
+  final String categoryId;
   final String? brandId;
+  final String? condition; // new, like_new, good, fair, poor
+  final int? msrpCents;
+  final int? monthsSinceRelease;
+  final int? roundingQuantum; // default 100
 
   const PriceSuggestionRequest({
-    this.categoryId,
+    required this.categoryId,
     this.brandId,
+    this.condition,
+    this.msrpCents,
+    this.monthsSinceRelease,
+    this.roundingQuantum,
   });
 
-  factory PriceSuggestionRequest.fromJson(Map<String, dynamic> json) {
-    return PriceSuggestionRequest(
-      categoryId: (json['category_id'] ?? json['categoryId'])?.toString(),
-      brandId: (json['brand_id'] ?? json['brandId'])?.toString(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toQueryParams() {
     return {
-      if (categoryId != null) 'category_id': categoryId,
+      'category_id': categoryId,
       if (brandId != null) 'brand_id': brandId,
+      if (condition != null) 'condition': condition,
+      if (msrpCents != null) 'msrp_cents': msrpCents,
+      if (monthsSinceRelease != null) 'months_since_release': monthsSinceRelease,
+      if (roundingQuantum != null) 'rounding_quantum': roundingQuantum,
     };
   }
 }
 
-/// Request para computar sugerencia de precio
-/// 
-/// Según el schema ComputeIn del backend
+/// Request para computar y guardar sugerencia de precio
 class ComputePriceRequest {
-  final String? categoryId;
+  final String categoryId;
   final String? brandId;
+  final String? condition;
+  final int? msrpCents;
+  final int? monthsSinceRelease;
+  final int? roundingQuantum;
 
   const ComputePriceRequest({
-    this.categoryId,
+    required this.categoryId,
     this.brandId,
+    this.condition,
+    this.msrpCents,
+    this.monthsSinceRelease,
+    this.roundingQuantum,
   });
-
-  factory ComputePriceRequest.fromJson(Map<String, dynamic> json) {
-    return ComputePriceRequest(
-      categoryId: (json['category_id'] ?? json['categoryId'])?.toString(),
-      brandId: (json['brand_id'] ?? json['brandId'])?.toString(),
-    );
-  }
 
   Map<String, dynamic> toJson() {
     return {
-      if (categoryId != null) 'category_id': categoryId,
+      'category_id': categoryId,
       if (brandId != null) 'brand_id': brandId,
+      if (condition != null) 'condition': condition,
+      if (msrpCents != null) 'msrp_cents': msrpCents,
+      if (monthsSinceRelease != null) 'months_since_release': monthsSinceRelease,
+      if (roundingQuantum != null) 'rounding_quantum': roundingQuantum,
     };
   }
 }
 
-/// Algoritmos de sugerencia de precio comunes
+/// Algoritmos de sugerencia de precio
 class PriceSuggestionAlgorithm {
-  static const String p50 = 'p50'; // Mediana (percentil 50)
-  static const String p75 = 'p75'; // Percentil 75
-  static const String avg = 'avg'; // Promedio
-  static const String mlModel = 'ml_model'; // Modelo de ML
+  static const String localMedian = 'local_median';
+  static const String priorOnly = 'prior_only';
+  static const String priorLocalMix = 'prior+local_mix';
+  static const String msrpHeuristic = 'msrp_heuristic';
+  static const String hardcodedFallback = 'hardcoded_fallback';
   
   /// Lista de algoritmos disponibles
-  static const List<String> all = [p50, p75, avg, mlModel];
+  static const List<String> all = [
+    localMedian,
+    priorOnly,
+    priorLocalMix,
+    msrpHeuristic,
+    hardcodedFallback,
+  ];
 }
+
+/// Condiciones soportadas para productos
+class ProductCondition {
+  static const String newCondition = 'new';
+  static const String likeNew = 'like_new';
+  static const String good = 'good';
+  static const String fair = 'fair';
+  static const String poor = 'poor';
+  
+  static const List<String> all = [newCondition, likeNew, good, fair, poor];
+  
+  static String getLabel(String condition) {
+    switch (condition) {
+      case newCondition: return 'Nuevo';
+      case likeNew: return 'Como nuevo';
+      case good: return 'Bueno';
+      case fair: return 'Aceptable';
+      case poor: return 'Malo';
+      default: return condition;
+    }
+  }
+}
+
