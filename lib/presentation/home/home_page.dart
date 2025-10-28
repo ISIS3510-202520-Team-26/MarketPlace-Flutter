@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:market_app/core/ux/ux_tunning_service.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../data/repositories/listings_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
@@ -36,6 +37,14 @@ class _HomePageState extends State<HomePage> {
   Map<String, String> _brandById = {};
   Map<String, String> _categoryById = {};
   String? _selectedCategoryId;
+
+  // -------- Filtros de ubicación --------
+  bool _useLocationFilter = false;
+  bool _loadingLocation = false;
+  double? _userLat;
+  double? _userLon;
+  double _radiusKm = 5.0; // Radio por defecto
+  String? _locationError;
 
   // cache fotos
   final Set<String> _expanded = <String>{};
@@ -187,10 +196,23 @@ class _HomePageState extends State<HomePage> {
     setState(() { _loading = true; _err = null; });
 
     try {
+      // Si el filtro de ubicación está activo, usar searchListings con coordenadas
+      final ListingsPage listingsPage;
+      
+      if (_useLocationFilter && _userLat != null && _userLon != null) {
+        listingsPage = await _listingsRepo.searchListings(
+          pageSize: 200,
+          nearLat: _userLat,
+          nearLon: _userLon,
+          radiusKm: _radiusKm,
+        );
+      } else {
+        listingsPage = await _listingsRepo.searchListings(pageSize: 200);
+      }
+
       final futures = await Future.wait([
         _catalogRepo.getCategories(),
         _catalogRepo.getBrands(),
-        _listingsRepo.searchListings(pageSize: 200),
       ]);
 
       final cats = (futures[0] as List).map((c) => {
@@ -208,7 +230,6 @@ class _HomePageState extends State<HomePage> {
         'category_id': b.categoryId,
       }).toList();
       
-      final listingsPage = futures[2] as ListingsPage;
       final listings = listingsPage.items.map((l) => {
         'id': l.id,
         'uuid': l.id,
@@ -268,6 +289,92 @@ class _HomePageState extends State<HomePage> {
       if (seen.add(id)) out.add(m);
     }
     return out;
+  }
+
+  // -------------------- Ubicación --------------------
+  Future<void> _getUserLocation() async {
+    setState(() { _loadingLocation = true; _locationError = null; });
+    
+    try {
+      // Verificar si el servicio de ubicación está habilitado
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() => _locationError = 'GPS desactivado');
+        return;
+      }
+
+      // Verificar permisos
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      
+      if (permission == LocationPermission.deniedForever) {
+        setState(() => _locationError = 'Permiso denegado permanentemente');
+        return;
+      }
+      
+      if (permission == LocationPermission.denied) {
+        setState(() => _locationError = 'Permiso denegado');
+        return;
+      }
+
+      // Intentar obtener última ubicación conocida primero (más rápido)
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        _userLat = lastKnown.latitude;
+        _userLon = lastKnown.longitude;
+        if (mounted) setState(() {});
+      }
+
+      // Obtener ubicación actual (más precisa)
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
+      
+      _userLat = position.latitude;
+      _userLon = position.longitude;
+      
+      print('[HomePage] Ubicación obtenida: $_userLat, $_userLon');
+      
+      Telemetry.i.click('location_obtained', props: {
+        'lat': _userLat,
+        'lon': _userLon,
+      });
+      
+    } catch (e) {
+      _locationError = 'No se pudo obtener ubicación: $e';
+      print('[HomePage] Error obteniendo ubicación: $e');
+    } finally {
+      if (mounted) setState(() => _loadingLocation = false);
+    }
+  }
+
+  Future<void> _toggleLocationFilter(bool enabled) async {
+    if (enabled && _userLat == null) {
+      await _getUserLocation();
+      if (_userLat == null) {
+        // No se pudo obtener ubicación, desactivar filtro
+        setState(() => _useLocationFilter = false);
+        if (mounted && _locationError != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_locationError!)),
+          );
+        }
+        return;
+      }
+    }
+    
+    setState(() => _useLocationFilter = enabled);
+    
+    Telemetry.i.click('location_filter_toggle', props: {
+      'enabled': enabled,
+      'radius_km': _radiusKm,
+    });
+    
+    // Recargar listados con filtro de ubicación
+    await _bootstrap();
   }
 
   // -------------------- Search & Filters --------------------
@@ -571,6 +678,8 @@ class _HomePageState extends State<HomePage> {
                       ],
                       _buildCategoryChips(),
                       const SizedBox(height: 12),
+                      _buildLocationFilter(),
+                      const SizedBox(height: 12),
                       _buildSectionHeader(),
                       const SizedBox(height: 12),
                       if (_items.isEmpty)
@@ -673,6 +782,122 @@ class _HomePageState extends State<HomePage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildLocationFilter() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: _useLocationFilter 
+            ? Border.all(color: _primary, width: 1.5)
+            : null,
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                _useLocationFilter ? Icons.location_on : Icons.location_off,
+                color: _useLocationFilter ? _primary : Colors.grey.shade600,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Buscar cerca de mí',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: _useLocationFilter ? _primary : Colors.black87,
+                      ),
+                    ),
+                    if (_useLocationFilter && _userLat != null && _userLon != null)
+                      Text(
+                        'Radio: ${_radiusKm.toStringAsFixed(1)} km',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
+                      )
+                    else if (_loadingLocation)
+                      Text(
+                        'Obteniendo ubicación...',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
+                      )
+                    else if (_locationError != null)
+                      Text(
+                        _locationError!,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.red,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (_loadingLocation)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Switch(
+                  value: _useLocationFilter,
+                  onChanged: _loadingLocation ? null : _toggleLocationFilter,
+                  activeColor: _primary,
+                ),
+            ],
+          ),
+          if (_useLocationFilter && _userLat != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text(
+                  'Radio:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: _radiusKm,
+                    min: 1.0,
+                    max: 50.0,
+                    divisions: 49,
+                    label: '${_radiusKm.toStringAsFixed(1)} km',
+                    activeColor: _primary,
+                    onChanged: (value) {
+                      setState(() => _radiusKm = value);
+                    },
+                    onChangeEnd: (value) {
+                      Telemetry.i.click('location_radius_changed', props: {
+                        'radius_km': value,
+                      });
+                      _bootstrap(); // Recargar con nuevo radio
+                    },
+                  ),
+                ),
+                Text(
+                  '${_radiusKm.toStringAsFixed(1)} km',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _primary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
