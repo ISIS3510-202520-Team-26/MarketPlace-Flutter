@@ -5,9 +5,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:geolocator/geolocator.dart';
 
-import '../../data/api/listings_api.dart';
-import '../../data/api/images_api.dart';
-import '../../data/api/catalog_api.dart';
+import '../../data/repositories/listings_repository.dart';
+import '../../data/repositories/catalog_repository.dart';
+import '../../data/models/listing.dart';
 import '../../core/telemetry/telemetry.dart';
 
 class CreateListingPage extends StatefulWidget {
@@ -17,6 +17,10 @@ class CreateListingPage extends StatefulWidget {
 }
 
 class _CreateListingPageState extends State<CreateListingPage> {
+  // Repositories
+  final _listingsRepo = ListingsRepository();
+  final _catalogRepo = CatalogRepository();
+
   // UI
   static const _primary = Color(0xFF0F6E5D);
   static const _cardBg = Color(0xFFF7F8FA);
@@ -66,7 +70,13 @@ class _CreateListingPageState extends State<CreateListingPage> {
   Future<void> _loadCategories() async {
     setState(() => _catsBusy = true);
     try {
-      final cats = _uniqById(await CatalogApi().categories());
+      final catsModels = await _catalogRepo.getCategories();
+      final cats = _uniqById(catsModels.map((c) => {
+        'id': c.id,
+        'uuid': c.id,
+        'name': c.name,
+        'slug': c.slug,
+      }).toList());
       final ids = cats.map((c) => c['id'] as String).toSet();
       String? selected = _categoryId;
       if (selected == null || !ids.contains(selected)) {
@@ -98,7 +108,14 @@ class _CreateListingPageState extends State<CreateListingPage> {
       _brandId = null;
     });
     try {
-      final bs = _uniqById(await CatalogApi().brands(categoryId: categoryId));
+      final brandsModels = await _catalogRepo.getBrands(categoryId: categoryId);
+      final bs = _uniqById(brandsModels.map((b) => {
+        'id': b.id,
+        'uuid': b.id,
+        'name': b.name,
+        'slug': b.slug,
+        'category_id': b.categoryId,
+      }).toList());
       final ids = bs.map((b) => b['id'] as String).toSet();
       String? sel = _brandId;
       if (sel == null || !ids.contains(sel)) {
@@ -217,10 +234,10 @@ class _CreateListingPageState extends State<CreateListingPage> {
             children: [
               _pillButton(
                 icon: Icons.photo_camera_outlined,
-                label: 'Cámara/Galería',
+                label: 'Agregar Foto',
                 onTap: () {
-                  Telemetry.i.click('pick_image');
-                  _pick();
+                  Telemetry.i.click('open_image_picker');
+                  _showImageSourceDialog();
                 },
               ),
               const SizedBox(width: 12),
@@ -478,8 +495,14 @@ class _CreateListingPageState extends State<CreateListingPage> {
 
     try {
       setState(() => _catsBusy = true);
-      final cat = await CatalogApi().createCategory(name: name);
-      final newId = (cat['id'] ?? cat['uuid']) as String;
+      final catModel = await _catalogRepo.createCategory(name: name);
+      final cat = {
+        'id': catModel.id,
+        'uuid': catModel.id,
+        'name': catModel.name,
+        'slug': catModel.slug,
+      };
+      final newId = catModel.id;
 
       final next = _uniqById([..._categories, cat]);
       setState(() {
@@ -548,14 +571,17 @@ class _CreateListingPageState extends State<CreateListingPage> {
 
     try {
       setState(() => _brandsBusy = true);
-      final brand = await CatalogApi().createBrand(name: name, categoryId: selectedCat!);
+      final brandModel = await _catalogRepo.createBrand(
+        name: name,
+        categoryId: selectedCat!,
+      );
 
       if (_categoryId != selectedCat) {
         setState(() => _categoryId = selectedCat);
       }
       await _loadBrandsForCategory(selectedCat!);
 
-      setState(() => _brandId = brand['id'] as String);
+      setState(() => _brandId = brandModel.id);
       Telemetry.i.click('create_brand', props: {'name': name, 'brand_id': _brandId, 'category_id': selectedCat});
     } catch (e) {
       setState(() => _err = 'No se pudo crear la marca: $e');
@@ -564,11 +590,42 @@ class _CreateListingPageState extends State<CreateListingPage> {
     }
   }
 
-  // ---------------------- SUBMIT ----------------------
-  Future<void> _pick() async {
-    final img = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 95);
+  // ---------------------- IMAGE PICKER ----------------------
+  Future<void> _showImageSourceDialog() async {
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Seleccionar imagen'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: _primary),
+              title: const Text('Cámara'),
+              onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: _primary),
+              title: const Text('Galería'),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source != null) {
+      Telemetry.i.click('pick_image', props: {'source': source == ImageSource.camera ? 'camera' : 'gallery'});
+      await _pickImage(source);
+    }
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final img = await ImagePicker().pickImage(source: source, imageQuality: 95);
     if (img != null) setState(() => _picked = img);
   }
+
+  // ---------------------- SUBMIT ----------------------
 
   Future<void> _submit() async {
     if (_picked == null) { setState(() => _err = 'Selecciona una imagen.'); return; }
@@ -582,41 +639,53 @@ class _CreateListingPageState extends State<CreateListingPage> {
       final units = int.tryParse(_price.text.trim()) ?? 0;
       final priceCents = units * 100;
 
-      final payload = <String, dynamic>{
-        'title': _title.text.trim(),
-        'description': null,
-        'category_id': _categoryId,
-        'brand_id': _brandId,
-        'price_cents': priceCents,
-        'currency': 'COP',
-        'condition': 'used',
-        'quantity': 1,
-        if (_useLocation && _lat != null && _lon != null) 'latitude': _lat,
-        if (_useLocation && _lat != null && _lon != null) 'longitude': _lon,
-        'price_suggestion_used': false,
-        'quick_view_enabled': true,
-      };
+      final newListing = Listing(
+        id: '', // Backend asigna ID
+        sellerId: '', // Backend asigna desde token
+        title: _title.text.trim(),
+        description: null,
+        categoryId: _categoryId!,
+        brandId: _brandId,
+        priceCents: priceCents,
+        currency: 'COP',
+        condition: 'used',
+        quantity: 1,
+        isActive: true, // Nuevo listing activo por defecto
+        latitude: _useLocation ? _lat : null,
+        longitude: _useLocation ? _lon : null,
+        priceSuggestionUsed: false,
+        quickViewEnabled: true,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
 
-      final listing = await ListingsApi().create(payload);
+      final listing = await _listingsRepo.createListing(newListing);
 
       setState(() => _status = 'Comprimiendo imagen…');
 
       final original = File(_picked!.path);
       final bytes = await original.readAsBytes();
+      
+      print('[CreateListing] Tamaño original: ${bytes.length} bytes (${(bytes.length / 1024).toStringAsFixed(1)} KB)');
+      
       final compressed = await FlutterImageCompress.compressWithList(
-        bytes, minWidth: 1280, minHeight: 1280, quality: 85, format: CompressFormat.jpeg,
+        bytes, 
+        minWidth: 1024,
+        minHeight: 1024,
+        quality: 80,
+        format: CompressFormat.jpeg,
       );
+      
+      print('[CreateListing] Tamaño comprimido: ${compressed.length} bytes (${(compressed.length / 1024).toStringAsFixed(1)} KB)');
 
-      setState(() => _status = 'Subiendo imagen…');
+      setState(() => _status = 'Subiendo imagen… (${(compressed.length / 1024).toStringAsFixed(0)} KB)');
 
-      final imgApi = ImagesApi();
-      final (uploadUrl, objectKey) = await imgApi.presign(
-        listingId: listing['id'] as String,
+      await _listingsRepo.uploadListingImage(
+        listingId: listing.id,
+        imageBytes: compressed,
         filename: _picked!.name,
         contentType: 'image/jpeg',
       );
-      await imgApi.putToPresigned(uploadUrl, compressed, contentType: 'image/jpeg');
-      await imgApi.confirm(listingId: listing['id'], objectKey: objectKey);
 
       setState(() { _busy = false; _status = 'Listo ✅'; });
       if (mounted) {

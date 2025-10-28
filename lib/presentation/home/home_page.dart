@@ -4,10 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:market_app/core/ux/ux_tunning_service.dart';
 
-import '../../data/api/listings_api.dart';
-import '../../data/api/catalog_api.dart';
-import '../../data/api/images_api.dart';
-import '../../data/api/analytics_api.dart'; // ← NUEVO: para dwell
+import '../../data/repositories/listings_repository.dart';
+import '../../data/repositories/catalog_repository.dart';
+import '../../data/repositories/telemetry_repository.dart';
 import '../../core/telemetry/telemetry.dart';
 import '../../core/ux/ux_hints.dart';
 
@@ -18,6 +17,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  // -------- Repositories --------
+  final _listingsRepo = ListingsRepository();
+  final _catalogRepo = CatalogRepository();
+  final _telemetryRepo = TelemetryRepository();
+
   // -------- UI state --------
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
@@ -73,8 +77,16 @@ class _HomePageState extends State<HomePage> {
   // ---------- Dwell (endpoint) ----------
   Future<void> _loadDwellAndProgramCtas() async {
     try {
-      final data = await AnalyticsApi().bq24DwellByScreenToday(); // GET endpoint
-      final list = List<Map<String, dynamic>>.from(data);
+      final now = DateTime.now();
+      final startOfDay = DateTime(now.year, now.month, now.day);
+      final data = await _telemetryRepo.getTimeByScreen(
+        start: startOfDay,
+        end: now,
+      );
+      final list = data.map((t) => {
+        'screen': t.screen,
+        'avg_seconds': t.avgSeconds,
+      }).toList();
 
       // 1) Ranking de CTAs: mapeo pantalla → CTA, ordenado por avg_seconds desc
       list.sort((a, b) {
@@ -175,16 +187,41 @@ class _HomePageState extends State<HomePage> {
     setState(() { _loading = true; _err = null; });
 
     try {
-      final catalog = CatalogApi();
       final futures = await Future.wait([
-        catalog.categories(),
-        catalog.brands(),
-        ListingsApi().list(),
+        _catalogRepo.getCategories(),
+        _catalogRepo.getBrands(),
+        _listingsRepo.searchListings(pageSize: 200),
       ]);
 
-      final cats = List<Map<String, dynamic>>.from(futures[0] as List);
-      final brands = List<Map<String, dynamic>>.from(futures[1] as List);
-      final listings = List<Map<String, dynamic>>.from(futures[2] as List);
+      final cats = (futures[0] as List).map((c) => {
+        'id': c.id,
+        'uuid': c.id,
+        'name': c.name,
+        'slug': c.slug,
+      }).toList();
+      
+      final brands = (futures[1] as List).map((b) => {
+        'id': b.id,
+        'uuid': b.id,
+        'name': b.name,
+        'slug': b.slug,
+        'category_id': b.categoryId,
+      }).toList();
+      
+      final listingsPage = futures[2] as ListingsPage;
+      final listings = listingsPage.items.map((l) => {
+        'id': l.id,
+        'uuid': l.id,
+        'title': l.title,
+        'price_cents': l.priceCents,
+        'category_id': l.categoryId,
+        'brand_id': l.brandId,
+        'photos': l.photos?.map((p) => {
+          'storage_key': p.storageKey,
+          'image_url': p.imageUrl,
+          'preview_url': p.imageUrl, // ListingPhoto solo tiene imageUrl
+        }).toList() ?? [],
+      }).toList();
 
       _categories = _uniqById(cats);
       _categoryById = {
@@ -292,7 +329,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _ensurePhotoUrlFor(String listingId, String objectKey) async {
     if (_photoUrlCache.containsKey(listingId)) return;
     try {
-      final url = await ImagesApi().preview(objectKey);
+      final url = await _listingsRepo.getImagePreviewUrl(objectKey);
       if (!mounted) return;
       setState(() { _photoUrlCache[listingId] = url; });
     } catch (_) {/* placeholder */}
