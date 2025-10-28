@@ -1,12 +1,26 @@
 // lib/core/telemetry/telemetry.dart
 import 'dart:async';
-import '../../data/api/telemetry_api.dart';
+import '../../data/repositories/telemetry_repository.dart';
+import '../../data/models/event.dart';
 
+/// Singleton for centralized telemetry tracking.
+///
+/// This is a convenience wrapper around TelemetryRepository with:
+/// - Automatic batching (20 events or 2 seconds)
+/// - Simplified API for common events
+/// - Best-effort delivery with retry on failure
+///
+/// Usage:
+/// ```dart
+/// Telemetry.i.view('home_screen');
+/// Telemetry.i.click('buy_button', listingId: '123');
+/// await Telemetry.i.flush(); // Force send on logout
+/// ```
 class Telemetry {
   Telemetry._();
   static final Telemetry i = Telemetry._();
 
-  final _api = TelemetryApi();
+  final _repo = TelemetryRepository();
   final List<Map<String, dynamic>> _buf = [];
   Timer? _timer;
 
@@ -34,7 +48,9 @@ class Telemetry {
     _timer = null;
 
     try {
-      await _api.sendBatch(batch);
+      // Convert maps to Event objects
+      final events = batch.map((json) => Event.fromJson(json)).toList();
+      await _repo.ingestEvents(events);
     } catch (_) {
       // Best-effort: si falla, reinsertamos (limitamos para no crecer infinito)
       _buf.insertAll(0, batch.take(200));

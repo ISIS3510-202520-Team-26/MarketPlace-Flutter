@@ -25,6 +25,11 @@ err.type == DioExceptionType.connectionError;
 // Si ya cancelaron la request, no reintentar
 final cancelled = req.cancelToken?.isCancelled == true;
 
+// Log para debugging
+print('[RetryInterceptor] ${req.method} ${req.uri}');
+print('  Error: ${err.type}, intento: ${attempt + 1}/$retries');
+print('  Transitorio: $transient, Cancelado: $cancelled');
+
 
 if (!transient || cancelled || attempt >= retries) {
 return handler.next(err);

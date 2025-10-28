@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../data/api/auth_api.dart';
+import '../../data/repositories/auth_repository.dart';
 import '../../core/telemetry/telemetry.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -14,6 +14,7 @@ class RegisterPage extends StatefulWidget {
 class _RegisterPageState extends State<RegisterPage> {
   static const _primary = Color(0xFF0F6E5D);
 
+  final _authRepo = AuthRepository();
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
@@ -145,7 +146,7 @@ class _RegisterPageState extends State<RegisterPage> {
     });
 
     try {
-      await AuthApi().register(
+      await _authRepo.register(
         name: name,
         email: email,
         password: pass,

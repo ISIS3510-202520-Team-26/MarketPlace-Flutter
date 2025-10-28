@@ -2,48 +2,70 @@
 import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:dio/dio.dart';
 
-import '../net/dio_client.dart';
+import '../../data/repositories/telemetry_repository.dart';
 import 'ux_hints.dart';
 
+/// Service for UX tuning based on analytics data.
+///
+/// Uses TelemetryRepository to fetch analytics (BQ 2.1, 2.2, 2.4) and
+/// computes personalized UX hints like:
+/// - Recommended categories (based on local usage)
+/// - Whether to auto-open filters (if users don't use them)
+/// - Default sort by distance (if users toggle location often)
+/// - CTA priority based on dwell time per screen
 class UxTuningService {
   UxTuningService._();
   static final UxTuningService instance = UxTuningService._();
 
-  final Dio _dio = DioClient.instance.dio;
+  final _telemetry = TelemetryRepository();
 
   static const _kCacheKey = 'ux_hints_cache_v1';
   static const _kRecentsKey = 'ux_recent_categories_v1';
 
+  /// Loads UX hints based on analytics data from the last [window].
+  ///
+  /// Fetches BQ 2.1 (events per type), BQ 2.2 (clicks), and BQ 2.4 (dwell time)
+  /// to compute intelligent hints. Results are cached in SharedPreferences.
+  ///
+  /// Falls back to cached hints if the network request fails.
   Future<UxHints> loadHints({Duration window = const Duration(hours: 24)}) async {
     final end = DateTime.now().toUtc();
     final start = end.subtract(window);
-    String iso(DateTime d) => d.toIso8601String();
 
     try {
-      final r21 = await _dio.get('/analytics/bq/2_1', queryParameters: {
-        'start': iso(start), 'end': iso(end),
-      });
-      final r22 = await _dio.get('/analytics/bq/2_2', queryParameters: {
-        'start': iso(start), 'end': iso(end),
-      });
-      // ← NUEVO: dwell por pantalla
-      final r24 = await _dio.get('/analytics/bq/2_4', queryParameters: {
-        'start': iso(start), 'end': iso(end),
-      });
+      // Fetch analytics data using TelemetryRepository
+      final bq21 = await _telemetry.getEventsPerTypeByDay(start: start, end: end);
+      final bq22 = await _telemetry.getClicksByButtonByDay(start: start, end: end);
+      final bq24 = await _telemetry.getTimeByScreen(start: start, end: end);
 
-      final List<Map<String, dynamic>> bq21 = (r21.data as List).cast<Map<String, dynamic>>();
-      final List<Map<String, dynamic>> bq22 = (r22.data as List).cast<Map<String, dynamic>>();
-      final List<Map<String, dynamic>> bq24 = (r24.data as List).cast<Map<String, dynamic>>();
+      // Convert to maps for compatibility with existing _computeHints logic
+      final bq21Maps = bq21.map((e) => {
+        'event_type': e.eventType,
+        'count': e.count,
+      }).toList();
 
-      final hints = await _computeHints(bq21, bq22, bq24);
+      final bq22Maps = bq22.map((e) => {
+        'button': e.button,
+        'count': e.count,
+      }).toList();
 
+      final bq24Maps = bq24.map((e) => {
+        'screen': e.screen,
+        'total_seconds': e.totalSeconds,
+        'views': e.views,
+        'avg_seconds': e.avgSeconds,
+      }).toList();
+
+      final hints = await _computeHints(bq21Maps, bq22Maps, bq24Maps);
+
+      // Cache for offline use
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kCacheKey, jsonEncode(hints.toJson()));
 
       return hints;
     } catch (_) {
+      // Fallback to cached hints
       final sp = await SharedPreferences.getInstance();
       final raw = sp.getString(_kCacheKey);
       if (raw != null) {

@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../data/api/auth_api.dart';
+import '../../data/repositories/auth_repository.dart';
 import '../../core/telemetry/telemetry.dart';
 
 class LoginPage extends StatefulWidget {
@@ -14,6 +14,7 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   static const _primary = Color(0xFF0F6E5D);
 
+  final _authRepo = AuthRepository();
   final _email = TextEditingController();
   final _password = TextEditingController();
 
@@ -129,7 +130,7 @@ class _LoginPageState extends State<LoginPage> {
     Telemetry.i.click('login_submit', props: {'email_domain': _emailDomain(email)});
 
     try {
-      await AuthApi().login(email: email, password: pass);
+      await _authRepo.login(email: email, password: pass);
       Telemetry.i.click('login_result', props: {'ok': true});
       await Telemetry.i.flush();
       if (mounted) context.go('/'); // Home
