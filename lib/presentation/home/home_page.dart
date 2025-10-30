@@ -56,14 +56,12 @@ class _HomePageState extends State<HomePage> {
   bool _nudgeShown = false;
 
   // -------- CTAs por tiempo --------
-  // Orden dinámico de CTAs basado en dwell por pantalla (endpoint)
   List<String> _ctaPriority = const ['search', 'publish', 'auth']; // fallback
-  // Mostrar CTA tras X segundos en esta pestaña (home)
   Timer? _ctaShowTimer;
   bool _ctaReady = false;
   int _homeAvgSeconds = 20; // fallback si endpoint falla
-  static const int _ctaMinSeconds = 6;   // límites sanos para no demorar demasiado
-  static const int _ctaMaxSeconds = 60;  // ni esperar eternidades
+  static const int _ctaMinSeconds = 6;
+  static const int _ctaMaxSeconds = 60;
 
   // “No gracias” con cooldown
   final Map<String, DateTime> _dismissedAt = <String, DateTime>{};
@@ -80,7 +78,7 @@ class _HomePageState extends State<HomePage> {
     _searchCtrl.addListener(_onSearchChanged);
     Telemetry.i.view('home');
     _loadUxHints();
-    _loadDwellAndProgramCtas(); // ← carga ranking y programa timer por tiempo
+    _loadDwellAndProgramCtas();
   }
 
   // ---------- Dwell (endpoint) ----------
@@ -93,18 +91,16 @@ class _HomePageState extends State<HomePage> {
         end: now,
       );
       final list = data.map((t) => {
-        'screen': t.screen,
-        'avg_seconds': t.avgSeconds,
-      }).toList();
+            'screen': t.screen,
+            'avg_seconds': t.avgSeconds,
+          }).toList();
 
-      // 1) Ranking de CTAs: mapeo pantalla → CTA, ordenado por avg_seconds desc
       list.sort((a, b) {
         final av = ((a['avg_seconds'] ?? 0) as num).toDouble();
         final bv = ((b['avg_seconds'] ?? 0) as num).toDouble();
         return bv.compareTo(av);
       });
 
-      // Mapea a claves de CTA y quita duplicados manteniendo orden
       final mapped = <String>[];
       for (final e in list) {
         final screen = (e['screen'] ?? '').toString();
@@ -115,7 +111,6 @@ class _HomePageState extends State<HomePage> {
         setState(() => _ctaPriority = mapped);
       }
 
-      // 2) Umbral temporal para mostrar CTA en Home: usa avg_seconds de 'home'
       final homeRow = list.firstWhere(
         (e) => (e['screen'] ?? '') == 'home',
         orElse: () => const {'avg_seconds': 20},
@@ -123,10 +118,8 @@ class _HomePageState extends State<HomePage> {
       final avg = ((homeRow['avg_seconds'] ?? 20) as num).toInt();
       _homeAvgSeconds = avg.clamp(_ctaMinSeconds, _ctaMaxSeconds);
 
-      // Programa timer para mostrar CTA tras _homeAvgSeconds
       _scheduleCtaShowTimer();
     } catch (_) {
-      // Fallback: sin endpoint, usamos defaults y mostramos tras 20s
       _homeAvgSeconds = 20;
       _scheduleCtaShowTimer();
     }
@@ -135,12 +128,12 @@ class _HomePageState extends State<HomePage> {
   String? _ctaKeyForScreen(String screen) {
     switch (screen) {
       case 'home':
-        return 'search';     // CTA enfocado a compra/búsqueda
+        return 'search';
       case 'create_listing':
-        return 'publish';    // CTA de publicar
+        return 'publish';
       case 'login':
       case 'register':
-        return 'auth';       // CTA de registro/autenticación
+        return 'auth';
       default:
         return null;
     }
@@ -158,7 +151,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // ---------- UX hints (chips, nudge filtros) ----------
+  // ---------- UX hints ----------
   Future<void> _loadUxHints() async {
     try {
       final hints = await UxTuningService.instance.loadHints();
@@ -193,12 +186,14 @@ class _HomePageState extends State<HomePage> {
 
   // -------------------- Bootstrap --------------------
   Future<void> _bootstrap() async {
-    setState(() { _loading = true; _err = null; });
+    setState(() {
+      _loading = true;
+      _err = null;
+    });
 
     try {
-      // Si el filtro de ubicación está activo, usar searchListings con coordenadas
       final ListingsPage listingsPage;
-      
+
       if (_useLocationFilter && _userLat != null && _userLon != null) {
         listingsPage = await _listingsRepo.searchListings(
           pageSize: 200,
@@ -216,43 +211,42 @@ class _HomePageState extends State<HomePage> {
       ]);
 
       final cats = (futures[0] as List).map((c) => {
-        'id': c.id,
-        'uuid': c.id,
-        'name': c.name,
-        'slug': c.slug,
-      }).toList();
-      
+            'id': c.id,
+            'uuid': c.id,
+            'name': c.name,
+            'slug': c.slug,
+          }).toList();
+
       final brands = (futures[1] as List).map((b) => {
-        'id': b.id,
-        'uuid': b.id,
-        'name': b.name,
-        'slug': b.slug,
-        'category_id': b.categoryId,
-      }).toList();
-      
+            'id': b.id,
+            'uuid': b.id,
+            'name': b.name,
+            'slug': b.slug,
+            'category_id': b.categoryId,
+          }).toList();
+
       final listings = listingsPage.items.map((l) => {
-        'id': l.id,
-        'uuid': l.id,
-        'title': l.title,
-        'price_cents': l.priceCents,
-        'category_id': l.categoryId,
-        'brand_id': l.brandId,
-        'photos': l.photos?.map((p) => {
-          'storage_key': p.storageKey,
-          'image_url': p.imageUrl,
-          'preview_url': p.imageUrl, // ListingPhoto solo tiene imageUrl
-        }).toList() ?? [],
-      }).toList();
+            'id': l.id,
+            'uuid': l.id,
+            'title': l.title,
+            'price_cents': l.priceCents,
+            'category_id': l.categoryId,
+            'brand_id': l.brandId,
+            'photos': l.photos?.map((p) => {
+                  'storage_key': p.storageKey,
+                  'image_url': p.imageUrl,
+                  'preview_url': p.imageUrl,
+                }).toList() ??
+                [],
+          }).toList();
 
       _categories = _uniqById(cats);
       _categoryById = {
-        for (final c in _categories)
-          (c['id'] as String): (c['name'] ?? '').toString(),
+        for (final c in _categories) (c['id'] as String): (c['name'] ?? '').toString(),
       };
 
       _brandById = {
-        for (final b in _uniqById(brands))
-          (b['id'] as String): (b['name'] ?? '').toString(),
+        for (final b in _uniqById(brands)) (b['id'] as String): (b['name'] ?? '').toString(),
       };
 
       _all = listings.map((it) => _augmentListing(it)).toList();
@@ -267,15 +261,11 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic> _augmentListing(Map<String, dynamic> it) {
     final m = Map<String, dynamic>.from(it);
     final brandId = (m['brand_id'] ?? m['brandId'])?.toString();
-    final catId   = (m['category_id'] ?? m['categoryId'])?.toString();
+    final catId = (m['category_id'] ?? m['categoryId'])?.toString();
 
-    m['brand_name'] = m['brand_name'] ??
-        m['brand']?['name'] ??
-        (brandId != null ? _brandById[brandId] : null);
-
-    m['category_name'] = m['category_name'] ??
-        m['category']?['name'] ??
-        (catId != null ? _categoryById[catId] : null);
+    m['brand_name'] = m['brand_name'] ?? m['brand']?['name'] ?? (brandId != null ? _brandById[brandId] : null);
+    m['category_name'] =
+        m['category_name'] ?? m['category']?['name'] ?? (catId != null ? _categoryById[catId] : null);
 
     return m;
   }
@@ -293,33 +283,33 @@ class _HomePageState extends State<HomePage> {
 
   // -------------------- Ubicación --------------------
   Future<void> _getUserLocation() async {
-    setState(() { _loadingLocation = true; _locationError = null; });
-    
+    setState(() {
+      _loadingLocation = true;
+      _locationError = null;
+    });
+
     try {
-      // Verificar si el servicio de ubicación está habilitado
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         setState(() => _locationError = 'GPS desactivado');
         return;
       }
 
-      // Verificar permisos
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      
+
       if (permission == LocationPermission.deniedForever) {
         setState(() => _locationError = 'Permiso denegado permanentemente');
         return;
       }
-      
+
       if (permission == LocationPermission.denied) {
         setState(() => _locationError = 'Permiso denegado');
         return;
       }
 
-      // Intentar obtener última ubicación conocida primero (más rápido)
       final lastKnown = await Geolocator.getLastKnownPosition();
       if (lastKnown != null) {
         _userLat = lastKnown.latitude;
@@ -327,22 +317,20 @@ class _HomePageState extends State<HomePage> {
         if (mounted) setState(() {});
       }
 
-      // Obtener ubicación actual (más precisa)
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.medium,
         timeLimit: const Duration(seconds: 10),
       );
-      
+
       _userLat = position.latitude;
       _userLon = position.longitude;
-      
+
       print('[HomePage] Ubicación obtenida: $_userLat, $_userLon');
-      
+
       Telemetry.i.click('location_obtained', props: {
         'lat': _userLat,
         'lon': _userLon,
       });
-      
     } catch (e) {
       _locationError = 'No se pudo obtener ubicación: $e';
       print('[HomePage] Error obteniendo ubicación: $e');
@@ -355,7 +343,6 @@ class _HomePageState extends State<HomePage> {
     if (enabled && _userLat == null) {
       await _getUserLocation();
       if (_userLat == null) {
-        // No se pudo obtener ubicación, desactivar filtro
         setState(() => _useLocationFilter = false);
         if (mounted && _locationError != null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -365,15 +352,14 @@ class _HomePageState extends State<HomePage> {
         return;
       }
     }
-    
+
     setState(() => _useLocationFilter = enabled);
-    
+
     Telemetry.i.click('location_filter_toggle', props: {
       'enabled': enabled,
       'radius_km': _radiusKm,
     });
-    
-    // Recargar listados con filtro de ubicación
+
     await _bootstrap();
   }
 
@@ -410,7 +396,7 @@ class _HomePageState extends State<HomePage> {
       cur = cur.where((it) {
         final title = (it['title'] ?? '').toString().toLowerCase();
         final brand = (it['brand_name'] ?? it['brand']?['name'] ?? '').toString().toLowerCase();
-        final catn  = (it['category_name'] ?? it['category']?['name'] ?? '').toString().toLowerCase();
+        final catn = (it['category_name'] ?? it['category']?['name'] ?? '').toString().toLowerCase();
         return title.contains(q) || brand.contains(q) || catn.contains(q);
       }).toList();
     }
@@ -424,6 +410,7 @@ class _HomePageState extends State<HomePage> {
     if (photos == null || photos.isEmpty) return null;
     final p = (photos.first as Map);
     return (p['image_url'] ?? p['preview_url'])?.toString();
+    // Nota: en tu DTO de photo usas imageUrl; aquí soportamos ambas claves.
   }
 
   String? _firstPhotoStorageKey(Map<String, dynamic> it) {
@@ -438,7 +425,9 @@ class _HomePageState extends State<HomePage> {
     try {
       final url = await _listingsRepo.getImagePreviewUrl(objectKey);
       if (!mounted) return;
-      setState(() { _photoUrlCache[listingId] = url; });
+      setState(() {
+        _photoUrlCache[listingId] = url;
+      });
     } catch (_) {/* placeholder */}
   }
 
@@ -518,7 +507,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget? _buildDwellCta() {
-    if (!_ctaReady) return null; // ← solo mostrar si ya pasó el tiempo en esta pestaña
+    if (!_ctaReady) return null;
 
     final key = _nextCtaKey();
     if (key == null) return null;
@@ -596,13 +585,13 @@ class _HomePageState extends State<HomePage> {
                     FilledButton(
                       onPressed: onTap,
                       style: FilledButton.styleFrom(
-                        backgroundColor: _primary, foregroundColor: Colors.white,
+                        backgroundColor: _primary,
+                        foregroundColor: Colors.white,
                       ),
                       child: Text(actionText),
                     ),
                     const SizedBox(width: 8),
-                    if (onDismiss != null)
-                      TextButton(onPressed: onDismiss, child: const Text('No gracias')),
+                    if (onDismiss != null) TextButton(onPressed: onDismiss, child: const Text('No gracias')),
                   ],
                 ),
               ],
@@ -620,7 +609,6 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -652,7 +640,6 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(width: 12),
         ],
       ),
-
       body: RefreshIndicator(
         onRefresh: () async {
           await _bootstrap();
@@ -693,7 +680,6 @@ class _HomePageState extends State<HomePage> {
                     ],
                   ),
       ),
-
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           Telemetry.i.click('fab_publish');
@@ -734,7 +720,8 @@ class _HomePageState extends State<HomePage> {
       builder: (_) {
         return Padding(
           padding: EdgeInsets.only(
-            left: 16, right: 16,
+            left: 16,
+            right: 16,
             bottom: MediaQuery.of(context).viewInsets.bottom + 16,
             top: 8,
           ),
@@ -791,9 +778,7 @@ class _HomePageState extends State<HomePage> {
       decoration: BoxDecoration(
         color: _cardBg,
         borderRadius: BorderRadius.circular(14),
-        border: _useLocationFilter 
-            ? Border.all(color: _primary, width: 1.5)
-            : null,
+        border: _useLocationFilter ? Border.all(color: _primary, width: 1.5) : null,
       ),
       child: Column(
         children: [
@@ -820,26 +805,17 @@ class _HomePageState extends State<HomePage> {
                     if (_useLocationFilter && _userLat != null && _userLon != null)
                       Text(
                         'Radio: ${_radiusKm.toStringAsFixed(1)} km',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade600,
-                        ),
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                       )
                     else if (_loadingLocation)
                       Text(
                         'Obteniendo ubicación...',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade600,
-                        ),
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                       )
                     else if (_locationError != null)
-                      Text(
-                        _locationError!,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.red,
-                        ),
+                      const Text(
+                        'No se pudo obtener ubicación',
+                        style: TextStyle(fontSize: 11, color: Colors.red),
                       ),
                   ],
                 ),
@@ -878,20 +854,14 @@ class _HomePageState extends State<HomePage> {
                       setState(() => _radiusKm = value);
                     },
                     onChangeEnd: (value) {
-                      Telemetry.i.click('location_radius_changed', props: {
-                        'radius_km': value,
-                      });
-                      _bootstrap(); // Recargar con nuevo radio
+                      Telemetry.i.click('location_radius_changed', props: {'radius_km': value});
+                      _bootstrap();
                     },
                   ),
                 ),
                 Text(
                   '${_radiusKm.toStringAsFixed(1)} km',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: _primary,
-                  ),
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _primary),
                 ),
               ],
             ),
@@ -963,10 +933,7 @@ class _HomePageState extends State<HomePage> {
         setState(() => _selectedCategoryId = isSelected ? id : null);
         _applyFilters();
 
-        Telemetry.i.click('filter_category', props: {
-          'category_id': id,
-          'selected': isSelected,
-        });
+        Telemetry.i.click('filter_category', props: {'category_id': id, 'selected': isSelected});
 
         if (isSelected && id != null) {
           Telemetry.i.filterUsed(filter: 'category', value: id);
@@ -979,9 +946,7 @@ class _HomePageState extends State<HomePage> {
         color: selected ? Colors.white : _primary,
         fontWeight: FontWeight.w600,
       ),
-      side: BorderSide(
-        color: selected ? Colors.transparent : Colors.grey.shade300,
-      ),
+      side: BorderSide(color: selected ? Colors.transparent : Colors.grey.shade300),
       selectedColor: _primary,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
     );
@@ -1011,13 +976,13 @@ class _HomePageState extends State<HomePage> {
 
     final title = (it['title'] ?? '').toString();
     final brand = (it['brand_name'] ?? it['brand']?['name'] ?? '').toString();
-    final cat   = (it['category_name'] ?? it['category']?['name'] ?? '').toString();
+    final cat = (it['category_name'] ?? it['category']?['name'] ?? '').toString();
     final subtitle = brand.isNotEmpty ? brand : cat;
 
     final immediateUrl = _firstPhotoUrl(it);
-    final storageKey   = _firstPhotoStorageKey(it);
-    final cachedUrl    = _photoUrlCache[id];
-    final photoUrl     = immediateUrl ?? cachedUrl;
+    final storageKey = _firstPhotoStorageKey(it);
+    final cachedUrl = _photoUrlCache[id];
+    final photoUrl = immediateUrl ?? cachedUrl;
 
     if (photoUrl == null && storageKey != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1028,6 +993,7 @@ class _HomePageState extends State<HomePage> {
     return InkWell(
       onTap: () {
         Telemetry.i.click('listing_card', listingId: id);
+        // Navegación al detalle (ruta con nombre):
         context.push('/listings/$id');
       },
       borderRadius: BorderRadius.circular(16),
@@ -1042,32 +1008,43 @@ class _HomePageState extends State<HomePage> {
           children: [
             AspectRatio(
               aspectRatio: 1,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: photoUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: photoUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (c, _) => Container(color: Colors.grey.shade200),
-                        errorWidget: (c, _, __) => Container(
-                          color: Colors.grey.shade200,
+              child: Hero(
+                tag: 'listing-photo-$id',
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: photoUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: photoUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (c, _) => Container(color: Colors.grey.shade200),
+                          errorWidget: (c, _, __) => Container(
+                            color: Colors.grey.shade200,
+                            alignment: Alignment.center,
+                            child: const Icon(Icons.image_not_supported_outlined),
+                          ),
+                        )
+                      : Container(
+                          color: Colors.grey.shade300,
                           alignment: Alignment.center,
-                          child: const Icon(Icons.image_not_supported_outlined),
+                          child: const Icon(Icons.image_outlined, size: 40, color: Colors.white),
                         ),
-                      )
-                    : Container(
-                        color: Colors.grey.shade300,
-                        alignment: Alignment.center,
-                        child: const Icon(Icons.image_outlined, size: 40, color: Colors.white),
-                      ),
+                ),
               ),
             ),
             const SizedBox(height: 6),
-            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            ),
             const SizedBox(height: 2),
-            Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -1082,10 +1059,14 @@ class _HomePageState extends State<HomePage> {
                   },
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
-                    width: 28, height: 28,
+                    width: 28,
+                    height: 28,
                     decoration: BoxDecoration(
-                      color: Colors.white, shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 6, offset: Offset(0,2))],
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 6, offset: const Offset(0, 2))
+                      ],
                     ),
                     child: const Icon(Icons.add, size: 18, color: _primary),
                   ),
