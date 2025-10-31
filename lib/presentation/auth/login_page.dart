@@ -1,9 +1,11 @@
 // lib/presentation/auth/login_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../data/repositories/auth_repository.dart';
 import '../../core/telemetry/telemetry.dart';
+import '../../core/utils/input_formatters.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -78,6 +80,8 @@ class _LoginPageState extends State<LoginPage> {
             controller: _password,
             obscureText: !_showPass,
             onSubmitted: (_) => _submit(),
+            maxLength: 40,
+            inputFormatters: [NoConsecutiveSpecialCharsFormatter()],
             decoration: _inputDecoration('Contraseña', hint: 'Mínimo 8 caracteres').copyWith(
               suffixIcon: IconButton(
                 onPressed: () {
@@ -173,6 +177,8 @@ class _LoginPageState extends State<LoginPage> {
       keyboardType: keyboardType,
       textInputAction: TextInputAction.next,
       onSubmitted: onSubmitted,
+      maxLength: 40,
+      inputFormatters: [NoConsecutiveSpecialCharsFormatter()],
       decoration: _inputDecoration(label, hint: hint),
     );
   }

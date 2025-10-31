@@ -1,9 +1,11 @@
 // lib/presentation/auth/register_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../data/repositories/auth_repository.dart';
 import '../../core/telemetry/telemetry.dart';
+import '../../core/utils/input_formatters.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -82,6 +84,8 @@ class _RegisterPageState extends State<RegisterPage> {
           TextField(
             controller: _password,
             obscureText: !_showPass,
+            maxLength: 40,
+            inputFormatters: [NoConsecutiveSpecialCharsFormatter()],
             decoration: _inputDecoration('Contraseña', hint: 'Mínimo 8 caracteres').copyWith(
               suffixIcon: IconButton(
                 onPressed: () {
@@ -196,6 +200,8 @@ class _RegisterPageState extends State<RegisterPage> {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      maxLength: 40,
+      inputFormatters: [NoConsecutiveSpecialCharsFormatter()],
       decoration: _inputDecoration(label, hint: hint),
     );
   }
