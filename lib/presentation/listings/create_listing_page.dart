@@ -518,7 +518,13 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Text(coordsText, style: const TextStyle(fontSize: 12)),
+                    Expanded(
+                      child: Text(
+                        coordsText,
+                        style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     IconButton(
                       onPressed: _locBusy ? null : () {
@@ -528,12 +534,17 @@ class _CreateListingPageState extends State<CreateListingPage> {
                       tooltip: 'Reintentar',
                       icon: const Icon(Icons.my_location, size: 20, color: _primary),
                     ),
-                    TextButton(
-                      onPressed: () {
-                        Telemetry.i.click('open_location_settings');
-                        Geolocator.openLocationSettings();
-                      },
-                      child: const Text('Ajustes de ubicación'),
+                    Flexible(
+                      child: TextButton(
+                        onPressed: () {
+                          Telemetry.i.click('open_location_settings');
+                          Geolocator.openLocationSettings();
+                        },
+                        child: const Text(
+                          'Ajustes de ubicación',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
                   ],
                 ),
