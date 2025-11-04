@@ -34,6 +34,10 @@ dependencies:
 
   # UI / media
   cached_network_image: ^3.4.1
+  shimmer: ^3.0.0
+  flutter_animate: ^4.5.0
+  google_fonts: ^6.2.1
+  flutter_staggered_animations: ^1.1.1
 
   # Contactos (si lo usas)
   flutter_contacts: ^1.1.7

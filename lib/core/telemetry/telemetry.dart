@@ -126,4 +126,42 @@ class Telemetry {
       'properties': props ?? const {},
     });
   }
+
+  /// [BQ1] Tracking de clics en categorías para análisis de popularidad
+  /// Permite responder: "¿Qué categorías son más populares entre los usuarios?"
+  void categoryClicked({
+    required String categoryId,
+    required String categoryName,
+    String? source, // 'home_chips', 'search', 'filter', etc.
+  }) {
+    _enqueue({
+      'event_type': 'category.clicked',
+      'category_id': categoryId,
+      'properties': {
+        'category_name': categoryName,
+        if (source != null) 'source': source,
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    });
+  }
+
+  /// [BQ1] Tracking de tiempo de navegación en una categoría
+  /// Permite medir engagement con categorías específicas
+  void categoryViewed({
+    required String categoryId,
+    required String categoryName,
+    required int durationSeconds,
+    int? itemsViewed,
+  }) {
+    _enqueue({
+      'event_type': 'category.viewed',
+      'category_id': categoryId,
+      'properties': {
+        'category_name': categoryName,
+        'duration_seconds': durationSeconds,
+        if (itemsViewed != null) 'items_viewed': itemsViewed,
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    });
+  }
 }

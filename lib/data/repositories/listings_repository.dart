@@ -138,6 +138,65 @@ class ListingsRepository {
     }
   }
 
+  // ==================== USER STATISTICS ====================
+
+  /// Obtiene las estadísticas del usuario actual (sus listings)
+  /// 
+  /// Retorna información sobre:
+  /// - Lista completa de listings del usuario
+  /// - Conteo de listings activos
+  /// - Conteo de listings vendidos (orders completadas)
+  /// - Valor total de listings
+  /// - Vistas totales (simulado por ahora)
+  Future<UserStatsData> getUserStats() async {
+    try {
+      print('[ListingsRepo] 📊 Obteniendo estadísticas del usuario...');
+      
+      // Obtener todos los listings del usuario actual (sin filtros)
+      // El backend filtra automáticamente por el usuario autenticado
+      final result = await searchListings(
+        page: 1,
+        pageSize: 100, // Obtener hasta 100 listings
+      );
+      
+      print('[ListingsRepo] ✅ Se obtuvieron ${result.items.length} listings');
+      
+      // Filtrar listings activos
+      final activeListings = result.items.where((l) => l.isActive).toList();
+      
+      // Por ahora, simular "vendidos" como listings inactivos
+      // En el futuro, esto vendría de una consulta a órdenes completadas
+      final soldListings = result.items.where((l) => !l.isActive).toList();
+      
+      // Calcular valor total (suma de precios de todos los listings)
+      final totalValue = result.items.fold<int>(
+        0,
+        (sum, listing) => sum + listing.priceCents,
+      );
+      
+      // Simular vistas por ahora (en producción vendría de analytics)
+      final viewsCount = result.items.length * 15 + DateTime.now().millisecond % 50;
+      
+      print('[ListingsRepo] 📈 Estadísticas:');
+      print('  Total: ${result.items.length}');
+      print('  Activos: ${activeListings.length}');
+      print('  Vendidos: ${soldListings.length}');
+      print('  Valor total: \$${(totalValue / 100).toStringAsFixed(0)}');
+      print('  Vistas: $viewsCount');
+      
+      return UserStatsData(
+        myListings: result.items,
+        activeCount: activeListings.length,
+        soldCount: soldListings.length,
+        totalValue: totalValue,
+        viewsCount: viewsCount,
+      );
+    } on DioException catch (e) {
+      print('[ListingsRepo] ❌ Error al obtener estadísticas: ${e.message}');
+      throw _handleError(e, 'Error al obtener estadísticas del usuario');
+    }
+  }
+
   // ==================== PRICE SUGGESTIONS ====================
 
   /// Obtiene sugerencia de precio para un listing
@@ -454,4 +513,21 @@ class ListingsPage {
   
   /// Verifica si hay resultados
   bool get isNotEmpty => items.isNotEmpty;
+}
+
+/// Modelo para estadísticas del usuario
+class UserStatsData {
+  final List<Listing> myListings;
+  final int activeCount;
+  final int soldCount;
+  final int totalValue;
+  final int viewsCount;
+
+  const UserStatsData({
+    required this.myListings,
+    required this.activeCount,
+    required this.soldCount,
+    required this.totalValue,
+    required this.viewsCount,
+  });
 }

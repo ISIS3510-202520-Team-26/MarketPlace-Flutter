@@ -137,7 +137,7 @@ class _LoginPageState extends State<LoginPage> {
       await _authRepo.login(email: email, password: pass);
       Telemetry.i.click('login_result', props: {'ok': true});
       await Telemetry.i.flush();
-      if (mounted) context.go('/'); // Home
+      if (mounted) context.go('/preloading'); // Pantalla de precarga
     } catch (e) {
       Telemetry.i.click('login_result', props: {'ok': false});
       setState(() => _err = 'No se pudo iniciar sesión: $e');

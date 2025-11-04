@@ -56,6 +56,20 @@ class User {
     };
   }
 
+  /// Convierte a JSON completo (para cache/storage)
+  /// 
+  /// Incluye todos los campos del usuario
+  Map<String, dynamic> toFullJson() {
+    return {
+      'id': id,
+      'name': name,
+      'email': email,
+      if (campus != null) 'campus': campus,
+      'created_at': createdAt.toIso8601String(),
+      if (lastLoginAt != null) 'last_login_at': lastLoginAt!.toIso8601String(),
+    };
+  }
+
   /// Verifica si tiene campus configurado
   bool get hasCampus => campus != null && campus!.isNotEmpty;
   

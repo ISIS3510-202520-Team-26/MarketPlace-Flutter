@@ -4,12 +4,21 @@ import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:market_app/core/ux/ux_tunning_service.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 
 import '../../data/repositories/listings_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../data/repositories/telemetry_repository.dart';
+import '../../data/repositories/auth_repository.dart';
 import '../../core/telemetry/telemetry.dart';
 import '../../core/ux/ux_hints.dart';
+import '../../core/storage/storage.dart';
+import '../../core/net/connectivity_service.dart';
+import '../../core/analytics/category_analytics.dart';
+import '../../core/services/cart_service.dart';
+import '../../core/services/preload_service.dart';
+import '../../core/theme/app_theme.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -22,13 +31,21 @@ class _HomePageState extends State<HomePage> {
   final _listingsRepo = ListingsRepository();
   final _catalogRepo = CatalogRepository();
   final _telemetryRepo = TelemetryRepository();
+  final _authRepo = AuthRepository();
+
+  // -------- Storage Services --------
+  final _storage = StorageHelper.instance;
+  final _cartService = CartService.instance;
+  
+  // -------- Analytics (BQ1) --------
+  final _analytics = CategoryAnalytics.instance;
+  DateTime? _categoryViewStartTime;
 
   // -------- UI state --------
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
 
   bool _loading = false;
-  String? _err;
 
   // -------- Data --------
   List<Map<String, dynamic>> _all = [];
@@ -47,13 +64,10 @@ class _HomePageState extends State<HomePage> {
   String? _locationError;
 
   // cache fotos
-  final Set<String> _expanded = <String>{};
   final Map<String, String> _photoUrlCache = {};
 
   // -------- UX desde BQs --------
   UxHints _hints = const UxHints();
-  int _plainSearches = 0;
-  bool _nudgeShown = false;
 
   // -------- CTAs por tiempo --------
   List<String> _ctaPriority = const ['search', 'publish', 'auth']; // fallback
@@ -74,11 +88,84 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _loadUserPreferences();
     _bootstrap();
     _searchCtrl.addListener(_onSearchChanged);
     Telemetry.i.view('home');
     _loadUxHints();
     _loadDwellAndProgramCtas();
+    _cartService.initialize(); // Inicializar carrito
+    _cartService.addListener(_onCartChanged); // Escuchar cambios del carrito
+    _cacheUserProfileInBackground(); // Cachear perfil en segundo plano
+    _listenToDataUpdates(); // Escuchar actualizaciones mediante Stream
+  }
+  
+  void _onCartChanged() {
+    if (mounted) setState(() {}); // Actualizar UI cuando cambie el carrito
+  }
+  
+  /// Escucha actualizaciones de datos mediante Stream del PreloadService
+  /// 
+  /// Cuando el PreloadService sincroniza datos en segundo plano (cada 30s),
+  /// este Stream recibe notificaciones y actualiza la UI automáticamente.
+  void _listenToDataUpdates() {
+    final preloadService = PreloadService.instance;
+    preloadService.dataUpdateStream.listen((event) {
+      if (!mounted) return;
+      
+      // Solo recargar si es actualización de listings o general
+      if (event.type == DataUpdateType.listings || event.type == DataUpdateType.all) {
+        print('[HomePage] 📡 Stream recibido: ${event.type} - Recargando datos...');
+        _bootstrap();
+      }
+    });
+  }
+
+  /// Cachea el perfil del usuario en segundo plano
+  /// 
+  /// Se ejecuta silenciosamente sin afectar la UI. Si hay error, no se muestra
+  /// al usuario ya que el perfil se intentará cargar directamente al abrir ProfilePage.
+  Future<void> _cacheUserProfileInBackground() async {
+    try {
+      print('[HomePage] 📥 Descargando perfil en segundo plano...');
+      
+      // Verificar si ya hay un perfil cacheado válido
+      final hasCachedProfile = await _storage.hasCachedUserProfile();
+      if (hasCachedProfile) {
+        print('[HomePage] ✅ Perfil ya cacheado, verificando si necesita actualización...');
+        
+        // Opcional: Verificar antigüedad del cache
+        final cacheTimestamp = await _storage.getProfileCacheTimestamp();
+        if (cacheTimestamp != null) {
+          final age = DateTime.now().difference(cacheTimestamp);
+          if (age.inHours < 24) {
+            print('[HomePage] ⏭️ Cache reciente (${age.inHours}h), omitiendo descarga');
+            return; // Cache es reciente, no descargar
+          }
+        }
+      }
+      
+      // Descargar perfil del backend
+      final user = await _authRepo.getCurrentUser();
+      
+      // Guardar en cache usando toFullJson()
+      await _storage.cacheUserProfile(user.toFullJson());
+      
+      print('[HomePage] 💾 Perfil cacheado exitosamente en segundo plano');
+    } catch (e) {
+      // Error silencioso - no afectar experiencia del usuario
+      print('[HomePage] ⚠️ Error al cachear perfil (silencioso): $e');
+      // No mostrar error al usuario, ProfilePage manejará el caso
+    }
+  }
+
+  // Cargar preferencias del usuario al iniciar
+  Future<void> _loadUserPreferences() async {
+    final prefs = await _storage.getDefaultFilters();
+    setState(() {
+      _useLocationFilter = prefs.locationEnabled;
+      _radiusKm = prefs.radius ?? 5.0;
+    });
   }
 
   // ---------- Dwell (endpoint) ----------
@@ -157,22 +244,7 @@ class _HomePageState extends State<HomePage> {
       final hints = await UxTuningService.instance.loadHints();
       if (!mounted) return;
       setState(() => _hints = hints);
-      _maybeShowFiltersNudge();
     } catch (_) {}
-  }
-
-  void _maybeShowFiltersNudge() {
-    if (!mounted || _nudgeShown) return;
-    if (_hints.autoOpenFiltersAfterNPlainSearches) {
-      _nudgeShown = true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tip: usa los filtros para resultados más relevantes.'),
-          duration: Duration(seconds: 4),
-        ),
-      );
-      Telemetry.i.click('use_filters_nudge_shown');
-    }
   }
 
   @override
@@ -181,17 +253,99 @@ class _HomePageState extends State<HomePage> {
     _ctaRearmTimer?.cancel();
     _ctaShowTimer?.cancel();
     _searchCtrl.dispose();
+    _cartService.removeListener(_onCartChanged); // Remover listener del carrito
     super.dispose();
   }
 
   // -------------------- Bootstrap --------------------
   Future<void> _bootstrap() async {
-    setState(() {
-      _loading = true;
-      _err = null;
-    });
+    // PASO 1: Cargar cache primero (si existe) y mostrarlo INMEDIATAMENTE
+    print('[HomePage] 📦 Intentando cargar cache...');
+    var cachedCategories = await _storage.getCachedCategories();
+    var cachedListings = await _storage.getCachedListings();
+    
+    print('[HomePage] Cache categorías: ${cachedCategories?.length ?? 0}');
+    print('[HomePage] Cache listados: ${cachedListings?.length ?? 0}');
+    
+    final hasCache = cachedCategories != null && 
+                     cachedListings != null && 
+                     cachedCategories.isNotEmpty && 
+                     cachedListings.isNotEmpty;
+    
+    print('[HomePage] ¿Tiene cache válido? $hasCache');
+    
+    if (hasCache) {
+      // Tenemos cache, mostrarlo INMEDIATAMENTE antes de verificar internet
+      print('[HomePage] ✅ Mostrando cache inmediatamente...');
+      _categories = _uniqById(cachedCategories);
+      _categoryById = {
+        for (final c in _categories) (c['id'] as String): (c['name'] ?? '').toString(),
+      };
+      
+      _all = cachedListings.map((it) => _augmentListing(it)).toList();
+      _applyFilters();
+      
+      // Mostrar la UI con los datos del cache
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    } else {
+      // No hay cache, mostrar loading
+      print('[HomePage] ⏳ No hay cache, mostrando loading...');
+      if (mounted) {
+        setState(() {
+          _loading = true;
+        });
+      }
+    }
 
+    // PASO 2: Verificar conectividad
+    final isOnline = await ConnectivityService.instance.isOnline;
+
+    // PASO 3: Si no hay internet
+    if (!isOnline) {
+      print('[HomePage] ❌ Sin conexión a internet');
+      
+      if (mounted) {
+        // SIEMPRE mostrar notificación de sin conexión
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.wifi_off, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    hasCache 
+                      ? 'Sin conexión. Mostrando datos guardados anteriormente.'
+                      : 'Sin conexión a internet. Por favor, verifica tu conexión.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: hasCache ? Colors.orange : Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        
+        // Si no hay cache, simplemente mostramos lista vacía con mensaje amigable
+        setState(() {
+          _loading = false;
+        });
+      }
+      return;
+    }
+
+    // PASO 4: Hay internet, intentar cargar datos frescos
     try {
+      // Si no teníamos cache, mostrar loading
+      if (!hasCache && mounted) {
+        setState(() => _loading = true);
+      }
+
+      // Hay internet, llamar API
       final ListingsPage listingsPage;
 
       if (_useLocationFilter && _userLat != null && _userLon != null) {
@@ -249,12 +403,72 @@ class _HomePageState extends State<HomePage> {
         for (final b in _uniqById(brands)) (b['id'] as String): (b['name'] ?? '').toString(),
       };
 
+      // Cachear categorías (24 horas)
+      print('[HomePage] 💾 Guardando categorías en cache...');
+      await _storage.cacheCategories(_categories);
+
+      // Cachear listados SIEMPRE (15 minutos) - incluso con filtro de ubicación
+      // para que el usuario pueda ver algo si pierde conexión
+      print('[HomePage] 💾 Guardando ${listings.length} listados en cache...');
+      await _storage.cacheListings(listings);
+      print('[HomePage] ✅ Cache guardado correctamente');
+
       _all = listings.map((it) => _augmentListing(it)).toList();
       _applyFilters();
-    } catch (e) {
-      _err = '$e';
-    } finally {
+      
       if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      print('[HomePage] ⚠️ Error al cargar de API: $e');
+      
+      // Error al cargar de API
+      if (mounted) {
+        if (hasCache) {
+          // Ya mostramos el cache antes, solo notificar el error
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.error_outline, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Error al actualizar datos. Mostrando datos guardados.'),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+          setState(() {
+            _loading = false;
+          });
+        } else {
+          // No hay cache ni datos, mostrar notificación pero NO pantalla de error
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.error_outline, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text('No se pudo cargar los datos. Verifica tu conexión.'),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'Reintentar',
+                textColor: Colors.white,
+                onPressed: () => _bootstrap(),
+              ),
+            ),
+          );
+          setState(() {
+            _loading = false;
+          });
+        }
+      }
     }
   }
 
@@ -355,6 +569,9 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _useLocationFilter = enabled);
 
+    // Guardar preferencia de ubicación
+    await UserPreferencesService.instance.setLocationEnabled(enabled);
+
     Telemetry.i.click('location_filter_toggle', props: {
       'enabled': enabled,
       'radius_km': _radiusKm,
@@ -375,6 +592,11 @@ class _HomePageState extends State<HomePage> {
           categoryId: _selectedCategoryId,
           results: _items.length,
         );
+        
+        // Guardar búsqueda en historial si no está vacía
+        if (q.isNotEmpty) {
+          _storage.recordSearch(q);
+        }
       }
     });
   }
@@ -628,13 +850,13 @@ class _HomePageState extends State<HomePage> {
             _openSearchSheet();
           }),
           const SizedBox(width: 8),
+          _buildCartIcon(),
+          const SizedBox(width: 8),
           _circleIcon(
-            icon: Icons.shopping_cart_outlined,
+            icon: Icons.person_outline,
             onTap: () {
-              Telemetry.i.click('cart_icon');
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Cart no implementado aún')),
-              );
+              Telemetry.i.click('profile_icon');
+              context.push('/profile');
             },
           ),
           const SizedBox(width: 12),
@@ -642,20 +864,15 @@ class _HomePageState extends State<HomePage> {
       ),
       body: RefreshIndicator(
         onRefresh: () async {
+          // Invalidar cache antes de recargar
+          await _storage.invalidateListingsCache();
           await _bootstrap();
           await _loadUxHints();
           await _loadDwellAndProgramCtas();
         },
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _err != null
-                ? ListView(children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(_err!, style: const TextStyle(color: Colors.red)),
-                    )
-                  ])
-                : ListView(
+            ? _buildShimmerLoading()
+            : ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     children: [
                       const SizedBox(height: 4),
@@ -663,6 +880,8 @@ class _HomePageState extends State<HomePage> {
                         dwellCta,
                         const SizedBox(height: 12),
                       ],
+                      _buildCategoryAnalytics(),
+                      const SizedBox(height: 12),
                       _buildCategoryChips(),
                       const SizedBox(height: 12),
                       _buildLocationFilter(),
@@ -670,9 +889,32 @@ class _HomePageState extends State<HomePage> {
                       _buildSectionHeader(),
                       const SizedBox(height: 12),
                       if (_items.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 40),
-                          child: Center(child: Text('Sin resultados')),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 32),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey[400]),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No hay productos disponibles',
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.grey[700]),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Verifica tu conexión a internet e intenta nuevamente',
+                                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 24),
+                              ElevatedButton.icon(
+                                onPressed: _bootstrap,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Reintentar'),
+                              ),
+                            ],
+                          ),
                         )
                       else
                         _buildGrid(),
@@ -680,19 +922,83 @@ class _HomePageState extends State<HomePage> {
                     ],
                   ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Telemetry.i.click('fab_publish');
-          context.push('/listings/create');
-        },
-        label: const Text('Publicar'),
-        icon: const Icon(Icons.add),
-        backgroundColor: _primary,
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: AppTheme.elevatedShadow,
+        ),
+        child: FloatingActionButton.extended(
+          onPressed: () {
+            Telemetry.i.click('fab_publish');
+            context.push('/listings/create');
+          },
+          label: const Text(
+            'Publicar',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
+          ),
+          icon: const Icon(Icons.add, size: 22),
+          backgroundColor: AppTheme.primary,
+          elevation: 0,
+        ),
       ),
     );
   }
 
   // ---------- Widgets auxiliares ----------
+  Widget _buildCartIcon() {
+    final itemCount = _cartService.totalItems;
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () {
+              Telemetry.i.click('cart_icon');
+              context.push('/cart');
+            },
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.shopping_cart_outlined, color: _primary, size: 20),
+            ),
+          ),
+          if (itemCount > 0)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  itemCount > 99 ? '99+' : '$itemCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _circleIcon({required IconData icon, VoidCallback? onTap}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -749,18 +1055,6 @@ class _HomePageState extends State<HomePage> {
                     categoryId: _selectedCategoryId,
                     results: _items.length,
                   );
-
-                  if (_selectedCategoryId == null) {
-                    _plainSearches++;
-                    if (_hints.autoOpenFiltersAfterNPlainSearches &&
-                        _plainSearches >= _hints.searchesWithoutFiltersThreshold) {
-                      _plainSearches = 0;
-                      _maybeShowFiltersNudge();
-                      Telemetry.i.click('filters_nudge_after_plain_searches');
-                    }
-                  } else {
-                    _plainSearches = 0;
-                  }
 
                   Navigator.pop(context);
                 },
@@ -853,8 +1147,10 @@ class _HomePageState extends State<HomePage> {
                     onChanged: (value) {
                       setState(() => _radiusKm = value);
                     },
-                    onChangeEnd: (value) {
+                    onChangeEnd: (value) async {
                       Telemetry.i.click('location_radius_changed', props: {'radius_km': value});
+                      // Guardar radio como preferencia
+                      await UserPreferencesService.instance.setDefaultRadius(value);
                       _bootstrap();
                     },
                   ),
@@ -929,15 +1225,54 @@ class _HomePageState extends State<HomePage> {
     return ChoiceChip(
       label: Text(label),
       selected: selected,
-      onSelected: (isSelected) {
+      onSelected: (isSelected) async {
+        // Guardar el tiempo de visualización de la categoría anterior
+        if (_categoryViewStartTime != null && _selectedCategoryId != null) {
+          final duration = DateTime.now().difference(_categoryViewStartTime!).inSeconds;
+          if (duration > 0) {
+            final prevCategoryName = _categoryById[_selectedCategoryId!] ?? 'Unknown';
+            
+            // [BQ1] Registrar tiempo de visualización en analytics local
+            await _analytics.recordCategoryViewDuration(
+              _selectedCategoryId!,
+              prevCategoryName,
+              duration,
+            );
+            
+            // [BQ1] Enviar a telemetría para análisis agregado
+            Telemetry.i.categoryViewed(
+              categoryId: _selectedCategoryId!,
+              categoryName: prevCategoryName,
+              durationSeconds: duration,
+              itemsViewed: _items.length,
+            );
+          }
+        }
+        
         setState(() => _selectedCategoryId = isSelected ? id : null);
         _applyFilters();
 
         Telemetry.i.click('filter_category', props: {'category_id': id, 'selected': isSelected});
 
         if (isSelected && id != null) {
+          // [BQ1] Registrar clic en categoría en analytics local
+          await _analytics.recordCategoryClick(id, label);
+          
+          // [BQ1] Enviar a telemetría para análisis agregado
+          Telemetry.i.categoryClicked(
+            categoryId: id,
+            categoryName: label,
+            source: 'home_chips',
+          );
+          
+          // Marcar inicio de visualización de esta categoría
+          _categoryViewStartTime = DateTime.now();
+          
           Telemetry.i.filterUsed(filter: 'category', value: id);
           UxTuningService.instance.recordLocalCategoryUse(id);
+        } else {
+          // Usuario deseleccionó la categoría
+          _categoryViewStartTime = null;
         }
       },
       shape: const StadiumBorder(),
@@ -954,17 +1289,31 @@ class _HomePageState extends State<HomePage> {
 
   // ---------- GRID ----------
   Widget _buildGrid() {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _items.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        mainAxisExtent: 300,
+    return AnimationLimiter(
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _items.length,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          mainAxisExtent: 300,
+        ),
+        itemBuilder: (context, index) {
+          return AnimationConfiguration.staggeredGrid(
+            position: index,
+            duration: const Duration(milliseconds: 375),
+            columnCount: 2,
+            child: ScaleAnimation(
+              scale: 0.5,
+              child: FadeInAnimation(
+                child: _buildListingCard(_items[index]),
+              ),
+            ),
+          );
+        },
       ),
-      itemBuilder: (context, index) => _buildListingCard(_items[index]),
     );
   }
 
@@ -990,19 +1339,23 @@ class _HomePageState extends State<HomePage> {
       });
     }
 
-    return InkWell(
-      onTap: () {
-        Telemetry.i.click('listing_card', listingId: id);
-        // Navegación al detalle (ruta con nombre):
-        context.push('/listings/$id');
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: _cardBg,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        padding: const EdgeInsets.all(12),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+        child: InkWell(
+          onTap: () {
+            Telemetry.i.click('listing_card', listingId: id);
+            context.push('/listings/$id');
+          },
+          borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1051,11 +1404,32 @@ class _HomePageState extends State<HomePage> {
                 Text(priceText, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
                 const Spacer(),
                 InkWell(
-                  onTap: () {
+                  onTap: () async {
                     Telemetry.i.click('add_to_cart', listingId: id);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Añadido al carrito (demo)')),
+                    
+                    await _cartService.addItem(
+                      listingId: id,
+                      title: title,
+                      priceCents: cents,
+                      currency: 'COP',
+                      imageUrl: photoUrl,
+                      sellerId: (it['seller_id'] ?? it['sellerId'])?.toString(),
                     );
+                    
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('$title añadido al carrito'),
+                          duration: const Duration(seconds: 2),
+                          action: SnackBarAction(
+                            label: 'Ver carrito',
+                            onPressed: () {
+                              context.push('/cart');
+                            },
+                          ),
+                        ),
+                      );
+                    }
                   },
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
@@ -1075,6 +1449,8 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+          ),
+        ),
       ),
     );
   }
@@ -1084,5 +1460,322 @@ class _HomePageState extends State<HomePage> {
     final rem = cents % 100;
     if (rem == 0) return '\$$intPart';
     return '\$${(cents / 100).toStringAsFixed(2)}';
+  }
+
+  /// [BQ1] Business Question: "¿Qué categorías son más populares?"
+  /// Widget que muestra las estadísticas de las categorías más clicadas
+  Widget _buildCategoryAnalytics() {
+    return FutureBuilder<List<CategoryStats>>(
+      future: _analytics.getTopCategories(limit: 3),
+      builder: (context, snapshot) {
+        // No mostrar nada si aún no hay datos
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final topCategories = snapshot.data!;
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [_primary.withOpacity(0.05), _primary.withOpacity(0.02)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _primary.withOpacity(0.1), width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.trending_up, color: _primary, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Tus categorías favoritas',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'BQ1',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: _primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...topCategories.asMap().entries.map((entry) {
+                final index = entry.key;
+                final stat = entry.value;
+                
+                return Padding(
+                  padding: EdgeInsets.only(bottom: index < topCategories.length - 1 ? 8 : 0),
+                  child: InkWell(
+                    onTap: () async {
+                      // Seleccionar esta categoría
+                      setState(() => _selectedCategoryId = stat.categoryId);
+                      _applyFilters();
+                      
+                      // Registrar el clic
+                      await _analytics.recordCategoryClick(stat.categoryId, stat.categoryName);
+                      Telemetry.i.categoryClicked(
+                        categoryId: stat.categoryId,
+                        categoryName: stat.categoryName,
+                        source: 'favorites_widget',
+                      );
+                      
+                      _categoryViewStartTime = DateTime.now();
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: _selectedCategoryId == stat.categoryId 
+                          ? _primary.withOpacity(0.1)
+                          : Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _selectedCategoryId == stat.categoryId
+                            ? _primary
+                            : Colors.grey.shade200,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          // Ranking medal
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: index == 0
+                                  ? Colors.amber
+                                  : index == 1
+                                      ? Colors.grey[400]
+                                      : Colors.brown[300],
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${index + 1}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Category name
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  stat.categoryName,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey[800],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${stat.clicks} ${stat.clicks == 1 ? 'clic' : 'clics'}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Stats
+                          if (stat.averageViewSeconds > 0) ...[
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Icon(Icons.access_time, size: 14, color: Colors.grey[600]),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${stat.averageViewSeconds.toStringAsFixed(0)}s',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+              const SizedBox(height: 8),
+              // Footer con información adicional
+              FutureBuilder<int>(
+                future: _analytics.getTotalCategoriesExplored(),
+                builder: (context, countSnapshot) {
+                  if (!countSnapshot.hasData) return const SizedBox.shrink();
+                  
+                  return Row(
+                    children: [
+                      Icon(Icons.explore, size: 12, color: Colors.grey[500]),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Has explorado ${countSnapshot.data} ${countSnapshot.data == 1 ? 'categoría' : 'categorías'}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[600],
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ==================== Shimmer Loading ====================
+  
+  Widget _buildShimmerLoading() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Category chips shimmer
+          _buildShimmerChips(),
+          const SizedBox(height: 20),
+          
+          // Grid shimmer
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.75,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: 6,
+            itemBuilder: (context, index) => _buildShimmerCard(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShimmerChips() {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey[300]!,
+      highlightColor: Colors.grey[100]!,
+      child: Row(
+        children: List.generate(
+          3,
+          (index) => Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Container(
+              width: 80,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShimmerCard() {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey[300]!,
+      highlightColor: Colors.grey[100]!,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image placeholder
+            AspectRatio(
+              aspectRatio: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: 80,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 60,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
