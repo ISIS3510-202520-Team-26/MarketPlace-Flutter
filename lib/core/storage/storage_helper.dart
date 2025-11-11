@@ -126,6 +126,95 @@ class StorageHelper {
     }
   }
 
+  // ==================== Listing Detail Management ====================
+
+  /// Cachea los detalles completos de un listing individual
+  /// 
+  /// [listingId] ID del listing
+  /// [listingData] Datos completos del listing incluyendo fotos, marca, categoría
+  /// [brandName] Nombre de la marca (opcional)
+  /// [categoryName] Nombre de la categoría (opcional)
+  /// [imageUrl] URL de la imagen principal (opcional)
+  /// TTL: 30 minutos (los detalles pueden cambiar si el vendedor edita)
+  Future<void> cacheListingDetail({
+    required String listingId,
+    required Map<String, dynamic> listingData,
+    String? brandName,
+    String? categoryName,
+    String? imageUrl,
+  }) async {
+    final detailData = {
+      ...listingData,
+      'cached_brand_name': brandName,
+      'cached_category_name': categoryName,
+      'cached_image_url': imageUrl,
+      'cached_at': DateTime.now().toIso8601String(),
+    };
+    
+    await _cache.set(
+      'listing_detail_$listingId',
+      detailData,
+      ttl: const Duration(minutes: 30),
+    );
+  }
+
+  /// Obtiene los detalles cacheados de un listing
+  /// 
+  /// Retorna null si no existe en cache o está expirado
+  Future<Map<String, dynamic>?> getCachedListingDetail(String listingId) async {
+    final cached = await _cache.get('listing_detail_$listingId');
+    if (cached != null && cached is Map) {
+      return Map<String, dynamic>.from(cached);
+    }
+    return null;
+  }
+
+  /// Cachea múltiples detalles de listings (usado en Home para precarga)
+  /// 
+  /// [listingsDetails] Lista de detalles completos de listings
+  /// Limpia los detalles cacheados previamente antes de guardar los nuevos
+  Future<void> cacheMultipleListingDetails(
+    List<Map<String, dynamic>> listingsDetails,
+  ) async {
+    // Primero, limpiar todos los detalles cacheados anteriormente
+    await clearAllListingDetails();
+    
+    // Cachear cada listing individual
+    for (final detail in listingsDetails) {
+      final listingId = detail['id']?.toString() ?? detail['uuid']?.toString();
+      if (listingId != null) {
+        await cacheListingDetail(
+          listingId: listingId,
+          listingData: detail,
+          brandName: detail['cached_brand_name']?.toString(),
+          categoryName: detail['cached_category_name']?.toString(),
+          imageUrl: detail['cached_image_url']?.toString(),
+        );
+      }
+    }
+    
+    print('[StorageHelper] ✅ Cacheados ${listingsDetails.length} detalles de listings');
+  }
+
+  /// Limpia todos los detalles de listings cacheados
+  /// 
+  /// Se ejecuta antes de cachear nuevos detalles para evitar acumulación
+  Future<void> clearAllListingDetails() async {
+    final keys = await _cache.getAllKeys();
+    final detailKeys = keys.where((k) => k.startsWith('listing_detail_'));
+    
+    for (final key in detailKeys) {
+      await _cache.remove(key);
+    }
+    
+    print('[StorageHelper] 🗑️ Limpiados ${detailKeys.length} detalles de listings del cache');
+  }
+
+  /// Verifica si existe un listing cacheado
+  Future<bool> hasListingDetail(String listingId) async {
+    return await _cache.has('listing_detail_$listingId');
+  }
+
   // ==================== Category Management ====================
 
   /// Caches categories with long TTL (they don't change often).
