@@ -176,7 +176,6 @@ class _ProfileStatsPageState extends State<ProfileStatsPage> {
       }
     }).catchError((error) {
       print('[ProfileStatsPage] ⚠️ No se pudo actualizar desde backend: $error');
-      // No hacer nada, mantener datos del caché
     });
   }
   
