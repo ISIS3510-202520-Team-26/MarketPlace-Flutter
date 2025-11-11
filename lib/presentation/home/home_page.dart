@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -6,6 +7,7 @@ import 'package:market_app/core/ux/ux_tunning_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
+import 'package:dio/dio.dart';
 
 import '../../data/repositories/listings_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
@@ -291,6 +293,10 @@ class _HomePageState extends State<HomePage> {
           _loading = false;
         });
       }
+      
+      // Precargar detalles de los listings del cache en segundo plano
+      // (se actualizarán más tarde si hay internet)
+      _preloadListingDetailsFromCache();
     } else {
       // No hay cache, mostrar loading
       print('[HomePage] ⏳ No hay cache, mostrando loading...');
@@ -379,20 +385,40 @@ class _HomePageState extends State<HomePage> {
             'category_id': b.categoryId,
           }).toList();
 
-      final listings = listingsPage.items.map((l) => {
-            'id': l.id,
-            'uuid': l.id,
-            'title': l.title,
-            'price_cents': l.priceCents,
-            'category_id': l.categoryId,
-            'brand_id': l.brandId,
-            'photos': l.photos?.map((p) => {
-                  'storage_key': p.storageKey,
-                  'image_url': p.imageUrl,
-                  'preview_url': p.imageUrl,
-                }).toList() ??
-                [],
-          }).toList();
+      // Convertir Listing objects a JSON completo (con todos los campos)
+      final listings = listingsPage.items.map((l) {
+        // Usar toUpdateJson() que incluye todos los campos necesarios
+        final json = <String, dynamic>{
+          'id': l.id,
+          'uuid': l.id,
+          'seller_id': l.sellerId,
+          'title': l.title,
+          'description': l.description,
+          'price_cents': l.priceCents,
+          'currency': l.currency,
+          'category_id': l.categoryId,
+          'brand_id': l.brandId,
+          'condition': l.condition,
+          'quantity': l.quantity,
+          'is_active': l.isActive,
+          'latitude': l.latitude,
+          'longitude': l.longitude,
+          'price_suggestion_used': l.priceSuggestionUsed,
+          'quick_view_enabled': l.quickViewEnabled,
+          'created_at': l.createdAt.toIso8601String(),
+          'updated_at': l.updatedAt.toIso8601String(),
+          'photos': l.photos?.map((p) => {
+                'id': p.id,
+                'listing_id': p.listingId,
+                'storage_key': p.storageKey,
+                'image_url': p.imageUrl,
+                'width': p.width,
+                'height': p.height,
+                'created_at': p.createdAt.toIso8601String(),
+              }).toList() ?? [],
+        };
+        return json;
+      }).toList();
 
       _categories = _uniqById(cats);
       _categoryById = {
@@ -415,6 +441,9 @@ class _HomePageState extends State<HomePage> {
 
       _all = listings.map((it) => _augmentListing(it)).toList();
       _applyFilters();
+      
+      // Precargar detalles de listings para modo offline
+      _preloadListingDetails();
       
       if (mounted) setState(() => _loading = false);
     } catch (e) {
@@ -482,6 +511,152 @@ class _HomePageState extends State<HomePage> {
         m['category_name'] ?? m['category']?['name'] ?? (catId != null ? _categoryById[catId] : null);
 
     return m;
+  }
+
+  /// Precarga los detalles desde el caché local (sin URLs presignadas nuevas)
+  /// 
+  /// Se ejecuta cuando mostramos datos del caché para tener los detalles disponibles offline.
+  /// No intenta obtener URLs presignadas nuevas, usa lo que ya está en el caché.
+  Future<void> _preloadListingDetailsFromCache() async {
+    try {
+      print('[HomePage] 🔄 Preparando detalles desde caché...');
+      print('[HomePage] Total de listings a cachear: ${_all.length}');
+      
+      final detailsToCache = <Map<String, dynamic>>[];
+      
+      for (final listing in _all) {
+        final listingId = (listing['id'] ?? listing['uuid'])?.toString();
+        if (listingId == null) {
+          print('[HomePage] ⚠️ Listing sin ID, saltando...');
+          continue;
+        }
+        
+        final detailData = Map<String, dynamic>.from(listing);
+        
+        // Agregar nombres legibles de marca y categoría
+        final brandId = (listing['brand_id'] ?? listing['brandId'])?.toString();
+        final categoryId = (listing['category_id'] ?? listing['categoryId'])?.toString();
+        
+        detailData['cached_brand_name'] = brandId != null ? _brandById[brandId] : null;
+        detailData['cached_category_name'] = categoryId != null ? _categoryById[categoryId] : null;
+        
+        // Usar imageUrl si está disponible (no intentar obtener presignadas)
+        String? imageUrl;
+        final photos = listing['photos'] as List<dynamic>?;
+        if (photos != null && photos.isNotEmpty) {
+          final firstPhoto = photos.first as Map<String, dynamic>;
+          imageUrl = firstPhoto['image_url']?.toString();
+        }
+        
+        detailData['cached_image_url'] = imageUrl;
+        detailsToCache.add(detailData);
+      }
+      
+      if (detailsToCache.isNotEmpty) {
+        print('[HomePage] 💾 Guardando ${detailsToCache.length} detalles en caché...');
+        await _storage.cacheMultipleListingDetails(detailsToCache);
+        print('[HomePage] ✅ Detalles preparados desde caché: ${detailsToCache.length} listings');
+      } else {
+        print('[HomePage] ⚠️ No hay detalles para cachear');
+      }
+    } catch (e) {
+      print('[HomePage] ⚠️ Error preparando detalles desde caché: $e');
+      print('[HomePage] Stack trace: ${StackTrace.current}');
+    }
+  }
+
+  /// Precarga los detalles de todos los listings visibles en Home
+  /// 
+  /// Este método se ejecuta en segundo plano después de cargar los listings.
+  /// Cachea los detalles completos (incluyendo URLs de imágenes presignadas)
+  /// para que funcionen offline cuando el usuario entre a la vista de detalle.
+  Future<void> _preloadListingDetails() async {
+    try {
+      print('[HomePage] 🔄 Iniciando precarga de detalles de listings...');
+      print('[HomePage] Total de listings a precachear: ${_all.length}');
+      
+      final detailsToCache = <Map<String, dynamic>>[];
+      
+      // Procesar cada listing visible
+      for (final listing in _all) {
+        final listingId = (listing['id'] ?? listing['uuid'])?.toString();
+        if (listingId == null) {
+          print('[HomePage] ⚠️ Listing sin ID, saltando...');
+          continue;
+        }
+        
+        // Preparar datos completos del listing
+        final detailData = Map<String, dynamic>.from(listing);
+        
+        // Agregar nombres legibles de marca y categoría
+        final brandId = (listing['brand_id'] ?? listing['brandId'])?.toString();
+        final categoryId = (listing['category_id'] ?? listing['categoryId'])?.toString();
+        
+        detailData['cached_brand_name'] = brandId != null ? _brandById[brandId] : null;
+        detailData['cached_category_name'] = categoryId != null ? _categoryById[categoryId] : null;
+        
+        // Intentar obtener y cachear la imagen como base64
+        String? cachedImage;
+        final photos = listing['photos'] as List<dynamic>?;
+        
+        if (photos != null && photos.isNotEmpty) {
+          final firstPhoto = photos.first as Map<String, dynamic>;
+          String? imageUrl;
+          
+          // Si ya tiene imageUrl, usarla
+          if (firstPhoto['image_url'] != null && firstPhoto['image_url'].toString().isNotEmpty) {
+            imageUrl = firstPhoto['image_url'].toString();
+          } 
+          // Si tiene storageKey, obtener URL presignada
+          else if (firstPhoto['storage_key'] != null && firstPhoto['storage_key'].toString().isNotEmpty) {
+            try {
+              imageUrl = await _listingsRepo.getImagePreviewUrl(
+                firstPhoto['storage_key'].toString(),
+              );
+            } catch (e) {
+              print('[HomePage] ⚠️ Error obteniendo URL para listing $listingId: $e');
+            }
+          }
+          
+          // Descargar la imagen y convertirla a base64 para cache offline
+          if (imageUrl != null) {
+            try {
+              final dio = Dio();
+              final response = await dio.get<List<int>>(
+                imageUrl,
+                options: Options(responseType: ResponseType.bytes),
+              );
+              
+              if (response.statusCode == 200 && response.data != null) {
+                final base64String = base64Encode(response.data!);
+                cachedImage = 'cached_image:$base64String';
+                print('[HomePage] 🖼️ Imagen descargada y cacheada para listing $listingId');
+              }
+            } catch (e) {
+              print('[HomePage] ⚠️ Error descargando imagen para listing $listingId: $e');
+              // Si falla la descarga, guardar la URL como fallback
+              cachedImage = imageUrl;
+            }
+          }
+        }
+        
+        detailData['cached_image_url'] = cachedImage;
+        detailsToCache.add(detailData);
+      }
+      
+      // Cachear todos los detalles de una vez
+      if (detailsToCache.isNotEmpty) {
+        print('[HomePage] 💾 Guardando ${detailsToCache.length} detalles con URLs presignadas...');
+        await _storage.cacheMultipleListingDetails(detailsToCache);
+        print('[HomePage] ✅ Precarga completada: ${detailsToCache.length} listings cacheados');
+      } else {
+        print('[HomePage] ⚠️ No hay detalles para precachear');
+      }
+    } catch (e) {
+      print('[HomePage] ⚠️ Error en precarga de detalles: $e');
+      print('[HomePage] Stack trace: ${StackTrace.current}');
+      // No interrumpir la experiencia del usuario si falla la precarga
+    }
   }
 
   List<Map<String, dynamic>> _uniqById(List<Map<String, dynamic>> list) {
@@ -873,7 +1048,11 @@ class _HomePageState extends State<HomePage> {
         child: _loading
             ? _buildShimmerLoading()
             : ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: _loading ? 0 : 80, // Espacio para FAB solo cuando no está cargando
+                    ),
                     children: [
                       const SizedBox(height: 4),
                       if (dwellCta != null) ...[
@@ -922,7 +1101,7 @@ class _HomePageState extends State<HomePage> {
                     ],
                   ),
       ),
-      floatingActionButton: Container(
+      floatingActionButton: _loading ? null : Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           boxShadow: AppTheme.elevatedShadow,
@@ -1666,30 +1845,28 @@ class _HomePageState extends State<HomePage> {
   // ==================== Shimmer Loading ====================
   
   Widget _buildShimmerLoading() {
-    return Padding(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Category chips shimmer
-          _buildShimmerChips(),
-          const SizedBox(height: 20),
-          
-          // Grid shimmer
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.75,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: 6,
-            itemBuilder: (context, index) => _buildShimmerCard(),
+      children: [
+        // Category chips shimmer
+        _buildShimmerChips(),
+        const SizedBox(height: 20),
+        
+        // Grid shimmer
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 0.75,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
           ),
-        ],
-      ),
+          itemCount: 6,
+          itemBuilder: (context, index) => _buildShimmerCard(),
+        ),
+        const SizedBox(height: 24), // Espacio adicional al final
+      ],
     );
   }
 
