@@ -21,6 +21,7 @@ import '../../core/analytics/category_analytics.dart';
 import '../../core/services/cart_service.dart';
 import '../../core/services/preload_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/theme_helper.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -83,9 +84,6 @@ class _HomePageState extends State<HomePage> {
   final Map<String, DateTime> _dismissedAt = <String, DateTime>{};
   Timer? _ctaRearmTimer;
   static const Duration _ctaCooldown = Duration(seconds: 90);
-
-  static const _primary = Color(0xFF0F6E5D);
-  static const _cardBg = Color(0xFFF7F8FA);
 
   @override
   void initState() {
@@ -962,12 +960,12 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _cardBg,
+        color: context.colors.cardBg,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          Icon(icon, color: _primary),
+          Icon(icon, color: context.colors.primary),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -982,7 +980,7 @@ class _HomePageState extends State<HomePage> {
                     FilledButton(
                       onPressed: onTap,
                       style: FilledButton.styleFrom(
-                        backgroundColor: _primary,
+                        backgroundColor: context.colors.primary,
                         foregroundColor: Colors.white,
                       ),
                       child: Text(actionText),
@@ -1003,20 +1001,16 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final dwellCta = _buildDwellCta();
+    final colors = context.colors;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: colors.scaffoldBg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
         titleSpacing: 16,
-        title: const Text(
+        title: Text(
           'Home',
-          style: TextStyle(
-            color: _primary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
+          style: Theme.of(context).textTheme.displayMedium?.copyWith(
+            color: colors.primary,
           ),
         ),
         actions: [
@@ -1148,7 +1142,7 @@ class _HomePageState extends State<HomePage> {
                 border: Border.all(color: Colors.grey.shade300),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.shopping_cart_outlined, color: _primary, size: 20),
+              child: Icon(Icons.shopping_cart_outlined, color: context.colors.primary, size: 20),
             ),
           ),
           if (itemCount > 0)
@@ -1191,7 +1185,7 @@ class _HomePageState extends State<HomePage> {
             border: Border.all(color: Colors.grey.shade300),
             shape: BoxShape.circle,
           ),
-          child: Icon(icon, color: _primary, size: 20),
+          child: Icon(icon, color: context.colors.primary, size: 20),
         ),
       ),
     );
@@ -1249,9 +1243,9 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _cardBg,
+        color: context.colors.cardBg,
         borderRadius: BorderRadius.circular(14),
-        border: _useLocationFilter ? Border.all(color: _primary, width: 1.5) : null,
+        border: _useLocationFilter ? Border.all(color: context.colors.primary, width: 1.5) : null,
       ),
       child: Column(
         children: [
@@ -1259,7 +1253,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               Icon(
                 _useLocationFilter ? Icons.location_on : Icons.location_off,
-                color: _useLocationFilter ? _primary : Colors.grey.shade600,
+                color: _useLocationFilter ? context.colors.primary : Colors.grey.shade600,
                 size: 20,
               ),
               const SizedBox(width: 8),
@@ -1272,7 +1266,7 @@ class _HomePageState extends State<HomePage> {
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
-                        color: _useLocationFilter ? _primary : Colors.black87,
+                        color: _useLocationFilter ? context.colors.primary : Colors.black87,
                       ),
                     ),
                     if (_useLocationFilter && _userLat != null && _userLon != null)
@@ -1303,7 +1297,7 @@ class _HomePageState extends State<HomePage> {
                 Switch(
                   value: _useLocationFilter,
                   onChanged: _loadingLocation ? null : _toggleLocationFilter,
-                  activeColor: _primary,
+                  activeColor: context.colors.primary,
                 ),
             ],
           ),
@@ -1322,7 +1316,7 @@ class _HomePageState extends State<HomePage> {
                     max: 50.0,
                     divisions: 49,
                     label: '${_radiusKm.toStringAsFixed(1)} km',
-                    activeColor: _primary,
+                    activeColor: context.colors.primary,
                     onChanged: (value) {
                       setState(() => _radiusKm = value);
                     },
@@ -1336,7 +1330,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 Text(
                   '${_radiusKm.toStringAsFixed(1)} km',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _primary),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: context.colors.primary),
                 ),
               ],
             ),
@@ -1457,11 +1451,11 @@ class _HomePageState extends State<HomePage> {
       shape: const StadiumBorder(),
       backgroundColor: Colors.white,
       labelStyle: TextStyle(
-        color: selected ? Colors.white : _primary,
+        color: selected ? Colors.white : context.colors.primary,
         fontWeight: FontWeight.w600,
       ),
       side: BorderSide(color: selected ? Colors.transparent : Colors.grey.shade300),
-      selectedColor: _primary,
+      selectedColor: context.colors.primary,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
     );
   }
@@ -1621,7 +1615,7 @@ class _HomePageState extends State<HomePage> {
                         BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 6, offset: const Offset(0, 2))
                       ],
                     ),
-                    child: const Icon(Icons.add, size: 18, color: _primary),
+                    child: Icon(Icons.add, size: 18, color: context.colors.primary),
                   ),
                 ),
               ],
@@ -1658,19 +1652,19 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [_primary.withOpacity(0.05), _primary.withOpacity(0.02)],
+              colors: [context.colors.primary.withOpacity(0.05), context.colors.primary.withOpacity(0.02)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _primary.withOpacity(0.1), width: 1),
+            border: Border.all(color: context.colors.primary.withOpacity(0.1), width: 1),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Icon(Icons.trending_up, color: _primary, size: 20),
+                  Icon(Icons.trending_up, color: context.colors.primary, size: 20),
                   const SizedBox(width: 8),
                   Text(
                     'Tus categorías favoritas',
@@ -1684,7 +1678,7 @@ class _HomePageState extends State<HomePage> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: _primary.withOpacity(0.1),
+                      color: context.colors.primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -1692,7 +1686,7 @@ class _HomePageState extends State<HomePage> {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: _primary,
+                        color: context.colors.primary,
                       ),
                     ),
                   ),
@@ -1726,12 +1720,12 @@ class _HomePageState extends State<HomePage> {
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: _selectedCategoryId == stat.categoryId 
-                          ? _primary.withOpacity(0.1)
+                          ? context.colors.primary.withOpacity(0.1)
                           : Colors.white,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: _selectedCategoryId == stat.categoryId
-                            ? _primary
+                            ? context.colors.primary
                             : Colors.grey.shade200,
                           width: 1,
                         ),
@@ -1956,3 +1950,5 @@ class _HomePageState extends State<HomePage> {
     );
   }
 }
+
+
