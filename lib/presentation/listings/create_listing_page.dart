@@ -11,6 +11,7 @@ import '../../data/models/listing.dart';
 import '../../data/models/price_suggestion.dart';
 import '../../core/telemetry/telemetry.dart';
 import '../../core/services/image_processing_isolate.dart';
+import '../../core/theme/theme_helper.dart';
 
 class CreateListingPage extends StatefulWidget {
   const CreateListingPage({super.key});
@@ -24,10 +25,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
   final _catalogRepo = CatalogRepository();
 
   // UI
-  static const _primary = Color(0xFF0F6E5D);
-  static const _cardBg = Color(0xFFF7F8FA);
-
-  final _title = TextEditingController();
+final _title = TextEditingController();
   final _price = TextEditingController();
   XFile? _picked;
 
@@ -261,17 +259,19 @@ class _CreateListingPageState extends State<CreateListingPage> {
       brandValue = brandItems.isNotEmpty ? brandItems.first['id'] as String : null;
     }
 
+    final colors = context.colors;
+    
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0,
-        iconTheme: const IconThemeData(color: _primary),
-        title: const Text(
+        iconTheme: IconThemeData(color: colors.primary),
+        title: Text(
           'Crear Listing',
           style: TextStyle(
-            color: _primary,
+            color: colors.primary,
             fontWeight: FontWeight.w800,
             fontSize: 20,
           ),
@@ -318,7 +318,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
               margin: const EdgeInsets.only(top: 8),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _priceSuggestionApplied ? Colors.green.shade50 : _cardBg,
+                color: _priceSuggestionApplied ? Colors.green.shade50 : colors.cardBg,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: _priceSuggestionApplied ? Colors.green : Colors.grey.shade300,
@@ -332,7 +332,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                     children: [
                       Icon(
                         _priceSuggestionApplied ? Icons.check_circle : Icons.lightbulb_outline,
-                        color: _priceSuggestionApplied ? Colors.green : _primary,
+                        color: _priceSuggestionApplied ? Colors.green : colors.primary,
                         size: 20,
                       ),
                       const SizedBox(width: 8),
@@ -340,7 +340,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                         _priceSuggestionApplied ? 'Sugerencia aplicada' : 'Precio sugerido',
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
-                          color: _priceSuggestionApplied ? Colors.green.shade700 : _primary,
+                          color: _priceSuggestionApplied ? Colors.green.shade700 : colors.primary,
                           fontSize: 14,
                         ),
                       ),
@@ -384,8 +384,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
                         icon: const Icon(Icons.check, size: 18),
                         label: const Text('Usar sugerencia'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: _primary,
-                          side: const BorderSide(color: _primary),
+                          foregroundColor: colors.primary,
+                          side: BorderSide(color: colors.primary),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -415,7 +415,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: _cardBg,
+                      color: colors.cardBg,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -449,7 +449,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
             decoration: _inputDecoration('Categoría').copyWith(
               suffixIcon: IconButton(
                 tooltip: 'Crear categoría',
-                icon: const Icon(Icons.add_circle_outline, color: _primary),
+                icon: Icon(Icons.add_circle_outline, color: colors.primary),
                 onPressed: _catsBusy ? null : () async {
                   Telemetry.i.click('open_create_category');
                   await _createCategoryDialog();
@@ -477,7 +477,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 decoration: _inputDecoration('Marca').copyWith(
                   suffixIcon: IconButton(
                     tooltip: 'Crear marca',
-                    icon: const Icon(Icons.add_circle_outline, color: _primary),
+                    icon: Icon(Icons.add_circle_outline, color: colors.primary),
                     onPressed: _brandsBusy ? null : () async {
                       Telemetry.i.click('open_create_brand');
                       await _createBrandDialog();
@@ -497,7 +497,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
           const SizedBox(height: 8),
           Container(
             decoration: BoxDecoration(
-              color: _cardBg,
+              color: colors.cardBg,
               borderRadius: BorderRadius.circular(14),
             ),
             padding: const EdgeInsets.all(12),
@@ -514,7 +514,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                   subtitle: _locBusy
                       ? const Text('Obteniendo ubicación…')
                       : Text(_locMsg ?? (_lat != null ? 'Ubicación lista' : 'Sin ubicación')),
-                  activeColor: _primary,
+                  activeColor: colors.primary,
                 ),
                 const SizedBox(height: 4),
                 Row(
@@ -533,7 +533,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                         _initLocation();
                       },
                       tooltip: 'Reintentar',
-                      icon: const Icon(Icons.my_location, size: 20, color: _primary),
+                      icon: Icon(Icons.my_location, size: 20, color: colors.primary),
                     ),
                     Flexible(
                       child: TextButton(
@@ -584,10 +584,12 @@ class _CreateListingPageState extends State<CreateListingPage> {
   }
 
   InputDecoration _inputDecoration(String label, {String? hint}) {
+    final colors = context.colors;
+    
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      floatingLabelStyle: const TextStyle(color: _primary, fontWeight: FontWeight.w600),
+      floatingLabelStyle: TextStyle(color: colors.primary, fontWeight: FontWeight.w600),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -595,7 +597,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _primary, width: 1.6),
+        borderSide: BorderSide(color: colors.primary, width: 1.6),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
@@ -617,13 +619,15 @@ class _CreateListingPageState extends State<CreateListingPage> {
   }
 
   Widget _pillButton({required IconData icon, required String label, required VoidCallback onTap}) {
+    final colors = context.colors;
+    
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(24),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: _primary,
+          color: colors.primary,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Row(
@@ -639,12 +643,14 @@ class _CreateListingPageState extends State<CreateListingPage> {
   }
 
   Widget _primaryButton({required String text, VoidCallback? onTap}) {
+    final colors = context.colors;
+    
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
         onPressed: onTap,
         style: ElevatedButton.styleFrom(
-          backgroundColor: _primary,
+          backgroundColor: colors.primary,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -773,6 +779,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
 
   // ---------------------- IMAGE PICKER ----------------------
   Future<void> _showImageSourceDialog() async {
+    final colors = context.colors;
+    
     final source = await showDialog<ImageSource>(
       context: context,
       builder: (context) => AlertDialog(
@@ -781,12 +789,12 @@ class _CreateListingPageState extends State<CreateListingPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: _primary),
+              leading: Icon(Icons.camera_alt, color: colors.primary),
               title: const Text('Cámara'),
               onTap: () => Navigator.of(context).pop(ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: _primary),
+              leading: Icon(Icons.photo_library, color: colors.primary),
               title: const Text('Galería'),
               onTap: () => Navigator.of(context).pop(ImageSource.gallery),
             ),
@@ -881,3 +889,6 @@ class _CreateListingPageState extends State<CreateListingPage> {
     }
   }
 }
+
+
+

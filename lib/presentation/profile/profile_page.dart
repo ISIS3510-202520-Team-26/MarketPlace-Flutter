@@ -4,6 +4,7 @@ import '../../data/models/user.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../core/telemetry/telemetry.dart';
 import '../../core/storage/storage.dart';
+import '../../core/theme/theme_helper.dart';
 import '../../core/net/connectivity_service.dart';
 
 /// Página de perfil de usuario
@@ -22,7 +23,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  static const Color _primary = Color(0xFF00695C);
+  
   
   final _authRepo = AuthRepository();
   final _storage = StorageHelper.instance;
@@ -79,7 +80,7 @@ class _ProfilePageState extends State<ProfilePage> {
         // Ya mostramos el cache, solo notificar
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Row(
                 children: [
                   Icon(Icons.wifi_off, color: Colors.white),
@@ -107,10 +108,7 @@ class _ProfilePageState extends State<ProfilePage> {
           });
           
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Row(
-                children: [
-                  Icon(Icons.wifi_off, color: Colors.white),
+            SnackBar(content: Row(children: [Icon(Icons.wifi_off, color: Colors.white),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text('Sin conexión a internet'),
@@ -157,7 +155,7 @@ class _ProfilePageState extends State<ProfilePage> {
         // Ya mostramos el cache, solo notificar el error de actualización
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Row(
                 children: [
                   Icon(Icons.error_outline, color: Colors.white),
@@ -190,14 +188,16 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: colors.scaffoldBg,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: _primary),
+          icon: Icon(Icons.arrow_back, color: colors.primary),
           onPressed: () {
             Telemetry.i.click('profile_back');
             context.pop();
@@ -205,10 +205,10 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         title: Row(
           children: [
-            const Text(
+             Text(
               'Perfil',
               style: TextStyle(
-                color: _primary,
+                color: colors.primary,
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
               ),
@@ -243,7 +243,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.edit_outlined, color: _primary),
+            icon: Icon(Icons.edit_outlined, color: colors.primary),
             onPressed: () {
               Telemetry.i.click('profile_edit');
               ScaffoldMessenger.of(context).showSnackBar(
@@ -281,12 +281,14 @@ class _ProfilePageState extends State<ProfilePage> {
 
   /// Header con foto de perfil y nombre
   Widget _buildProfileHeader() {
+    final colors = context.colors;
+    
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
+        border: const Border(
           bottom: BorderSide(color: Color(0xFFE0E0E0), width: 1),
         ),
       ),
@@ -301,13 +303,13 @@ class _ProfilePageState extends State<ProfilePage> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: LinearGradient(
-                    colors: [_primary, _primary.withOpacity(0.7)],
+                    colors: [colors.primary, colors.primary.withOpacity(0.7)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: _primary.withOpacity(0.3),
+                      color: colors.primary.withOpacity(0.3),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -343,9 +345,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ],
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.check_circle,
-                    color: _primary,
+                    color: colors.primary,
                     size: 26,
                   ),
                 ),
@@ -379,10 +381,12 @@ class _ProfilePageState extends State<ProfilePage> {
 
   /// Sección de información del usuario
   Widget _buildInfoSection() {
+    final colors = context.colors;
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.scaffoldBg,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -437,6 +441,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   /// Sección de acciones rápidas
   Widget _buildActionsSection() {
+    final colors = context.colors;
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
@@ -480,7 +486,7 @@ class _ProfilePageState extends State<ProfilePage> {
             icon: Icons.inventory_2_outlined,
             title: 'Mis Publicaciones',
             subtitle: 'Ver y administrar mis productos',
-            color: _primary,
+            color: colors.primary,
             onTap: () {
               Telemetry.i.click('profile_my_listings');
               ScaffoldMessenger.of(context).showSnackBar(
@@ -534,6 +540,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   /// Sección de configuración
   Widget _buildSettingsSection() {
+    final colors = context.colors;
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
@@ -562,6 +570,17 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           const Divider(height: 1),
+          _buildActionTile(
+            icon: Icons.settings_outlined,
+            title: 'Ajustes',
+            subtitle: 'Tema, idioma y preferencias',
+            color: Colors.orange,
+            onTap: () {
+              Telemetry.i.click('profile_settings');
+              context.push('/settings');
+            },
+          ),
+          const Divider(height: 1, indent: 56),
           _buildActionTile(
             icon: Icons.notifications_outlined,
             title: 'Notificaciones',
@@ -719,6 +738,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   /// Estado de error
   Widget _buildErrorState() {
+    final colors = context.colors;
+    
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -760,7 +781,7 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: const Icon(Icons.refresh),
               label: const Text('Reintentar'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primary,
+                backgroundColor: colors.primary,
                 foregroundColor: Colors.white,
               ),
             ),
@@ -793,7 +814,7 @@ class _ProfilePageState extends State<ProfilePage> {
               try {
                 // Mostrar loading
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
+                  SnackBar(
                     content: Row(
                       children: [
                         SizedBox(
@@ -872,3 +893,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 }
+
+
+
+

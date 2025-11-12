@@ -9,6 +9,7 @@ import '../../presentation/listings/listing_detail_page.dart';
 import '../../presentation/profile/profile_page.dart';
 import '../../presentation/profile/profile_stats_page.dart';
 import '../../presentation/cart/cart_page.dart';
+import '../../presentation/settings/settings_page.dart';
 import '../../data/models/listing.dart';
 
 class AppRouter {
@@ -36,6 +37,8 @@ class AppRouter {
       GoRoute(path: '/profile/stats', builder: (c, s) => const ProfileStatsPage()),
       // 🛒 Carrito de compras
       GoRoute(path: '/cart', builder: (c, s) => const CartPage()),
+      // ⚙️ Configuración
+      GoRoute(path: '/settings', builder: (c, s) => const SettingsPage()),
     ],
   );
 }

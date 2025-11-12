@@ -1,9 +1,91 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// Extension de tema para colores personalizados
+/// 
+/// Permite acceder a colores custom desde cualquier widget usando:
+/// Theme.of(context).extension<AppColors>()!.cardBg
+@immutable
+class AppColors extends ThemeExtension<AppColors> {
+  final Color primary;
+  final Color primaryLight;
+  final Color primaryDark;
+  final Color cardBg;
+  final Color scaffoldBg;
+  final Color textGray;
+  final Color textDark;
+  
+  const AppColors({
+    required this.primary,
+    required this.primaryLight,
+    required this.primaryDark,
+    required this.cardBg,
+    required this.scaffoldBg,
+    required this.textGray,
+    required this.textDark,
+  });
+  
+  // Colores para tema claro
+  static const light = AppColors(
+    primary: Color(0xFF0F6E5D),
+    primaryLight: Color(0xFF1A8A75),
+    primaryDark: Color(0xFF0A5246),
+    cardBg: Color(0xFFF7F8FA),
+    scaffoldBg: Color(0xFFFAFBFC),
+    textGray: Color(0xFF6B7280),
+    textDark: Color(0xFF1F2937),
+  );
+  
+  // Colores para tema oscuro
+  static const dark = AppColors(
+    primary: Color(0xFF1A8A75),
+    primaryLight: Color(0xFF22A88F),
+    primaryDark: Color(0xFF0F6E5D),
+    cardBg: Color(0xFF1E1E1E),
+    scaffoldBg: Color(0xFF121212),
+    textGray: Color(0xFFB0B0B0),
+    textDark: Color(0xFFE0E0E0),
+  );
+
+  @override
+  AppColors copyWith({
+    Color? primary,
+    Color? primaryLight,
+    Color? primaryDark,
+    Color? cardBg,
+    Color? scaffoldBg,
+    Color? textGray,
+    Color? textDark,
+  }) {
+    return AppColors(
+      primary: primary ?? this.primary,
+      primaryLight: primaryLight ?? this.primaryLight,
+      primaryDark: primaryDark ?? this.primaryDark,
+      cardBg: cardBg ?? this.cardBg,
+      scaffoldBg: scaffoldBg ?? this.scaffoldBg,
+      textGray: textGray ?? this.textGray,
+      textDark: textDark ?? this.textDark,
+    );
+  }
+
+  @override
+  AppColors lerp(ThemeExtension<AppColors>? other, double t) {
+    if (other is! AppColors) return this;
+    return AppColors(
+      primary: Color.lerp(primary, other.primary, t)!,
+      primaryLight: Color.lerp(primaryLight, other.primaryLight, t)!,
+      primaryDark: Color.lerp(primaryDark, other.primaryDark, t)!,
+      cardBg: Color.lerp(cardBg, other.cardBg, t)!,
+      scaffoldBg: Color.lerp(scaffoldBg, other.scaffoldBg, t)!,
+      textGray: Color.lerp(textGray, other.textGray, t)!,
+      textDark: Color.lerp(textDark, other.textDark, t)!,
+    );
+  }
+}
+
 /// Tema y estilos mejorados de la aplicación
 class AppTheme {
-  // Colores principales (manteniendo los existentes pero con mejor organización)
+  // Colores principales (manteniendo por compatibilidad - usar ThemeExtension en nuevo código)
   static const primary = Color(0xFF0F6E5D);
   static const primaryLight = Color(0xFF1A8A75);
   static const primaryDark = Color(0xFF0A5246);
@@ -67,83 +149,94 @@ class AppTheme {
   static const radiusLarge = 16.0;
   static const radiusXLarge = 24.0;
 
-  /// Tema principal de la app
-  static ThemeData get light {
+  /// Tema principal de la app con soporte para fontSize dinámico
+  static ThemeData light({double fontScale = 1.0, bool isDark = false}) {
+    final brightness = isDark ? Brightness.dark : Brightness.light;
+    final colors = isDark ? AppColors.dark : AppColors.light;
+    
     return ThemeData(
       useMaterial3: true,
+      brightness: brightness,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: primary,
-        brightness: Brightness.light,
-        primary: primary,
-        secondary: primaryLight,
+        seedColor: colors.primary,
+        brightness: brightness,
+        primary: colors.primary,
+        secondary: colors.primaryLight,
+        surface: colors.cardBg,
+        onSurface: colors.textDark,
       ),
-      scaffoldBackgroundColor: scaffoldBg,
+      scaffoldBackgroundColor: colors.scaffoldBg,
       
-      // Tipografía con Google Fonts
-      textTheme: GoogleFonts.interTextTheme().copyWith(
+      // Agregar colores custom como extension
+      extensions: [colors],
+      
+      // Tipografía con Google Fonts y escala dinámica
+      textTheme: GoogleFonts.interTextTheme(
+        ThemeData(brightness: brightness).textTheme,
+      ).copyWith(
         displayLarge: GoogleFonts.inter(
-          fontSize: 32,
+          fontSize: 32 * fontScale,
           fontWeight: FontWeight.w800,
-          color: textDark,
+          color: colors.textDark,
           letterSpacing: -0.5,
         ),
         displayMedium: GoogleFonts.inter(
-          fontSize: 28,
+          fontSize: 28 * fontScale,
           fontWeight: FontWeight.w700,
-          color: textDark,
+          color: colors.textDark,
           letterSpacing: -0.5,
         ),
         displaySmall: GoogleFonts.inter(
-          fontSize: 24,
+          fontSize: 24 * fontScale,
           fontWeight: FontWeight.w700,
-          color: textDark,
+          color: colors.textDark,
           letterSpacing: -0.3,
         ),
         headlineMedium: GoogleFonts.inter(
-          fontSize: 20,
+          fontSize: 20 * fontScale,
           fontWeight: FontWeight.w600,
-          color: textDark,
+          color: colors.textDark,
         ),
         titleLarge: GoogleFonts.inter(
-          fontSize: 18,
+          fontSize: 18 * fontScale,
           fontWeight: FontWeight.w600,
-          color: textDark,
+          color: colors.textDark,
         ),
         titleMedium: GoogleFonts.inter(
-          fontSize: 16,
+          fontSize: 16 * fontScale,
           fontWeight: FontWeight.w600,
-          color: textDark,
+          color: colors.textDark,
         ),
         bodyLarge: GoogleFonts.inter(
-          fontSize: 16,
+          fontSize: 16 * fontScale,
           fontWeight: FontWeight.w400,
-          color: textDark,
+          color: colors.textDark,
         ),
         bodyMedium: GoogleFonts.inter(
-          fontSize: 14,
+          fontSize: 14 * fontScale,
           fontWeight: FontWeight.w400,
-          color: textDark,
+          color: colors.textDark,
         ),
         labelLarge: GoogleFonts.inter(
-          fontSize: 14,
+          fontSize: 14 * fontScale,
           fontWeight: FontWeight.w600,
-          color: textDark,
+          color: colors.textDark,
         ),
       ),
       
       // AppBar theme
       appBarTheme: AppBarTheme(
-        backgroundColor: Colors.white,
+        backgroundColor: colors.scaffoldBg,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: GoogleFonts.inter(
-          fontSize: 24,
+          fontSize: 24 * fontScale,
           fontWeight: FontWeight.w800,
-          color: primary,
+          color: colors.primary,
           letterSpacing: -0.5,
         ),
-        iconTheme: const IconThemeData(color: primary),
+        iconTheme: IconThemeData(color: colors.primary),
       ),
       
       // Card theme
@@ -152,14 +245,14 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusLarge),
         ),
-        color: Colors.white,
-        shadowColor: Colors.black.withOpacity(0.04),
+        color: colors.cardBg,
+        shadowColor: Colors.black.withOpacity(isDark ? 0.3 : 0.04),
       ),
       
       // ElevatedButton theme
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
+          backgroundColor: colors.primary,
           foregroundColor: Colors.white,
           elevation: 0,
           shadowColor: Colors.transparent,
@@ -168,7 +261,7 @@ class AppTheme {
             borderRadius: BorderRadius.circular(radiusMedium),
           ),
           textStyle: GoogleFonts.inter(
-            fontSize: 15,
+            fontSize: 15 * fontScale,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -177,7 +270,7 @@ class AppTheme {
       // Input decoration theme
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: cardBg,
+        fillColor: colors.cardBg,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMedium),
           borderSide: BorderSide.none,
@@ -188,23 +281,24 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMedium),
-          borderSide: const BorderSide(color: primary, width: 2),
+          borderSide: BorderSide(color: colors.primary, width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         hintStyle: GoogleFonts.inter(
-          color: textGray,
-          fontSize: 14,
+          color: colors.textGray,
+          fontSize: 14 * fontScale,
           fontWeight: FontWeight.w400,
         ),
       ),
       
       // Chip theme
       chipTheme: ChipThemeData(
-        backgroundColor: cardBg,
-        selectedColor: primary.withOpacity(0.1),
+        backgroundColor: colors.cardBg,
+        selectedColor: colors.primary.withOpacity(0.1),
         labelStyle: GoogleFonts.inter(
-          fontSize: 13,
+          fontSize: 13 * fontScale,
           fontWeight: FontWeight.w500,
+          color: colors.textDark,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
@@ -232,9 +326,11 @@ class StyledCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
+    
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.cardBg,
         borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
         boxShadow: elevated ? AppTheme.elevatedShadow : AppTheme.cardShadow,
       ),
@@ -271,6 +367,8 @@ class StyledIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
+    
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -278,7 +376,7 @@ class StyledIconButton extends StatelessWidget {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: colors.cardBg,
             shape: BoxShape.circle,
             boxShadow: AppTheme.cardShadow,
           ),
@@ -290,7 +388,7 @@ class StyledIconButton extends StatelessWidget {
               customBorder: const CircleBorder(),
               child: Icon(
                 icon,
-                color: color ?? AppTheme.primary,
+                color: color ?? colors.primary,
                 size: 22,
               ),
             ),

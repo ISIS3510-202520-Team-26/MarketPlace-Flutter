@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../data/repositories/listings_repository.dart';
+import '../../data/repositories/offline_listings_repository.dart';
+import '../../data/repositories/offline_catalog_repository.dart';
 import '../../data/repositories/auth_repository.dart';
+import '../telemetry/telemetry.dart';
 import 'cart_service.dart';
 
 /// Servicio Singleton para precarga y sincronización en segundo plano
@@ -16,9 +18,21 @@ class PreloadService {
   PreloadService._();
   static final instance = PreloadService._();
 
-  final _listingsRepo = ListingsRepository();
-  final _authRepo = AuthRepository();
-  final _cartService = CartService.instance;
+  late final OfflineListingsRepository _listingsRepo;
+  late final OfflineCatalogRepository _catalogRepo;
+  late final AuthRepository _authRepo;
+  late final CartService _cartService;
+  
+  bool _repositoriesInitialized = false;
+  
+  void _initRepositories() {
+    if (_repositoriesInitialized) return;
+    _listingsRepo = OfflineListingsRepository();
+    _catalogRepo = OfflineCatalogRepository();
+    _authRepo = AuthRepository();
+    _cartService = CartService.instance;
+    _repositoriesInitialized = true;
+  }
 
   Timer? _syncTimer;
   bool _isInitialized = false;
@@ -46,6 +60,9 @@ class PreloadService {
       print('[PreloadService] Ya inicializado, omitiendo...');
       return;
     }
+
+    // Inicializar repositorios
+    _initRepositories();
 
     print('[PreloadService] 🚀 Iniciando precarga...');
 
@@ -98,7 +115,7 @@ class PreloadService {
 
   /// Realiza la precarga inicial de todos los datos
   Future<void> _performInitialPreload() async {
-    const totalSteps = 4;
+    const totalSteps = 5;
     var currentStep = 0;
 
     try {
@@ -113,7 +130,29 @@ class PreloadService {
       await _preloadUserProfile();
       await Future.delayed(const Duration(milliseconds: 300));
 
-      // Paso 2: Listings del Home
+      // Paso 2: Catálogo (categorías y marcas)
+      currentStep++;
+      _notifyProgress(PreloadProgress(
+        step: currentStep,
+        totalSteps: totalSteps,
+        message: 'Sincronizando catálogo...',
+        isComplete: false,
+      ));
+      await _preloadUserProfile();
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Paso 2: Catálogo (categorías y marcas)
+      currentStep++;
+      _notifyProgress(PreloadProgress(
+        step: currentStep,
+        totalSteps: totalSteps,
+        message: 'Sincronizando catálogo...',
+        isComplete: false,
+      ));
+      await _preloadCatalog();
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Paso 3: Listings del Home
       currentStep++;
       _notifyProgress(PreloadProgress(
         step: currentStep,
@@ -124,7 +163,7 @@ class PreloadService {
       await _preloadHomeListings();
       await Future.delayed(const Duration(milliseconds: 300));
 
-      // Paso 3: Carrito (ya inicializado, solo sincronizar)
+      // Paso 4: Carrito (ya inicializado, solo sincronizar)
       currentStep++;
       _notifyProgress(PreloadProgress(
         step: currentStep,
@@ -135,7 +174,7 @@ class PreloadService {
       await _preloadCart();
       await Future.delayed(const Duration(milliseconds: 300));
 
-      // Paso 4: Estadísticas del usuario
+      // Paso 5: Estadísticas del usuario
       currentStep++;
       _notifyProgress(PreloadProgress(
         step: currentStep,
@@ -171,14 +210,36 @@ class PreloadService {
       print('[PreloadService] 👤 Cargando perfil...');
       final user = await _authRepo.getCurrentUser();
       
+      // 🔧 FIX: Actualizar userId en Telemetry
+      await Telemetry.i.setUserId(user.id);
+      print('[PreloadService] 📊 Telemetry userId actualizado: ${user.id}');
+      
       // Guardar en caché
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('cached_user_profile', jsonEncode(user.toJson()));
+      await prefs.setString('cached_user_profile', jsonEncode(user.toFullJson()));
       await prefs.setInt('profile_cache_timestamp', DateTime.now().millisecondsSinceEpoch);
       
       print('[PreloadService] ✅ Perfil cacheado: ${user.name}');
     } catch (e) {
       print('[PreloadService] ❌ Error cargando perfil: $e');
+      // No lanzar error, continuar con otros datos
+    }
+  }
+
+  /// Precarga el catálogo (categorías y marcas)
+  Future<void> _preloadCatalog() async {
+    try {
+      print('[PreloadService] 📚 Cargando catálogo...');
+      
+      // Cargar categorías (se guardan automáticamente en SQLite gracias al wrapper)
+      final categories = await _catalogRepo.getCategories();
+      print('[PreloadService] ✅ ${categories.length} categorías guardadas en SQLite');
+      
+      // Cargar marcas (se guardan automáticamente en SQLite)
+      final brands = await _catalogRepo.getBrands();
+      print('[PreloadService] ✅ ${brands.length} marcas guardadas en SQLite');
+    } catch (e) {
+      print('[PreloadService] ❌ Error cargando catálogo: $e');
       // No lanzar error, continuar con otros datos
     }
   }
