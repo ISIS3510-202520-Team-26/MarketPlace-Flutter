@@ -15,29 +15,28 @@ class ImageProcessingService {
     print('[ImageProcessing] 🔄 [MULTI-THREADING] Iniciando compresión en Isolate...');
     final stopwatch = Stopwatch()..start();
     try {
-      final result = await compute(
-        _compressImageInBackground,
-        _ImageCompressionParams(
-          imageBytes: imageBytes,
-          quality: quality,
-          maxWidth: maxWidth,
-          maxHeight: maxHeight,
-        ),
+      // Comprimir directamente sin isolate para evitar problemas de serialización
+      final result = await FlutterImageCompress.compressWithList(
+        imageBytes,
+        quality: quality,
+        format: CompressFormat.jpeg,
       );
+      
       stopwatch.stop();
-      if (result != null) {
-        final originalSize = imageBytes.length / 1024;
-        final compressedSize = result.length / 1024;
-        final reduction = ((1 - (compressedSize / originalSize)) * 100).toStringAsFixed(1);
-        print('[ImageProcessing] ✅ Compresión completada en Isolate');
-        print('[ImageProcessing]    ⏱️  Tiempo: ${stopwatch.elapsedMilliseconds}ms');
-        print('[ImageProcessing]    📦 Original: ${originalSize.toStringAsFixed(1)} KB');
-        print('[ImageProcessing]    📦 Comprimida: ${compressedSize.toStringAsFixed(1)} KB');
-        print('[ImageProcessing]    📊 Reducción: $reduction%');
-      }
-      return result;
+      
+      final originalSize = imageBytes.length / 1024;
+      final compressedSize = result.length / 1024;
+      final reduction = ((1 - (compressedSize / originalSize)) * 100).toStringAsFixed(1);
+      
+      print('[ImageProcessing] ✅ Compresión completada');
+      print('[ImageProcessing]    ⏱️  Tiempo: ${stopwatch.elapsedMilliseconds}ms');
+      print('[ImageProcessing]    📦 Original: ${originalSize.toStringAsFixed(1)} KB');
+      print('[ImageProcessing]    📦 Comprimida: ${compressedSize.toStringAsFixed(1)} KB');
+      print('[ImageProcessing]    📊 Reducción: $reduction%');
+      
+      return Uint8List.fromList(result);
     } catch (e) {
-      print('[ImageProcessing] ❌ Error en Isolate: $e');
+      print('[ImageProcessing] ❌ Error en compresión: $e');
       return null;
     }
   }
@@ -50,23 +49,28 @@ class ImageProcessingService {
     print('[ImageProcessing] 🔄 [MULTI-THREADING] Comprimiendo ${images.length} imágenes en paralelo...');
     final stopwatch = Stopwatch()..start();
     try {
-      final futures = images.map((imageBytes) {
-        return compute(
-          _compressImageInBackground,
-          _ImageCompressionParams(
-            imageBytes: imageBytes,
+      final futures = images.map((imageBytes) async {
+        try {
+          final result = await FlutterImageCompress.compressWithList(
+            imageBytes,
             quality: quality,
-            maxWidth: maxWidth,
-            maxHeight: maxHeight,
-          ),
-        );
+            format: CompressFormat.jpeg,
+          );
+          return Uint8List.fromList(result);
+        } catch (e) {
+          print('[ImageProcessing] Error comprimiendo imagen: $e');
+          return null;
+        }
       }).toList();
+      
       final results = await Future.wait(futures);
       stopwatch.stop();
+      
       final successCount = results.where((r) => r != null).length;
       print('[ImageProcessing] ✅ Compresión múltiple completada');
       print('[ImageProcessing]    ⏱️  Tiempo total: ${stopwatch.elapsedMilliseconds}ms');
       print('[ImageProcessing]    ✅ Exitosas: $successCount/${images.length}');
+      
       return results;
     } catch (e) {
       print('[ImageProcessing] ❌ Error en compresión múltiple: $e');
@@ -77,30 +81,4 @@ class ImageProcessingService {
     final sizeKB = imageBytes.length / 1024;
     return sizeKB > maxSizeKB;
   }
-}
-Future<Uint8List?> _compressImageInBackground(_ImageCompressionParams params) async {
-  try {
-    final result = await FlutterImageCompress.compressWithList(
-      params.imageBytes,
-      quality: params.quality,
-      minWidth: params.maxWidth,
-      minHeight: params.maxHeight,
-    );
-    return Uint8List.fromList(result);
-  } catch (e) {
-    print('[ImageProcessing] Error en worker: $e');
-    return null;
-  }
-}
-class _ImageCompressionParams {
-  final Uint8List imageBytes;
-  final int quality;
-  final int maxWidth;
-  final int maxHeight;
-  _ImageCompressionParams({
-    required this.imageBytes,
-    required this.quality,
-    required this.maxWidth,
-    required this.maxHeight,
-  });
 }
