@@ -10,6 +10,7 @@ import '../../data/repositories/catalog_repository.dart';
 import '../../data/models/listing.dart';
 import '../../data/models/price_suggestion.dart';
 import '../../core/telemetry/telemetry.dart';
+import '../../core/services/image_processing_isolate.dart';
 
 class CreateListingPage extends StatefulWidget {
   const CreateListingPage({super.key});
@@ -820,8 +821,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
       final priceCents = units * 100;
 
       final newListing = Listing(
-        id: '', // Backend asigna ID
-        sellerId: '', // Backend asigna desde token
+        id: '', 
+        sellerId: '', 
         title: _title.text.trim(),
         description: null,
         categoryId: _categoryId!,
@@ -830,7 +831,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
         currency: 'COP',
         condition: 'used',
         quantity: 1,
-        isActive: true, // Nuevo listing activo por defecto
+        isActive: true, 
         latitude: _useLocation ? _lat : null,
         longitude: _useLocation ? _lon : null,
         priceSuggestionUsed: _priceSuggestionApplied,
@@ -840,21 +841,24 @@ class _CreateListingPageState extends State<CreateListingPage> {
       );
 
       final listing = await _listingsRepo.createListing(newListing);
-
-      setState(() => _status = 'Comprimiendo imagen…');
+      
+      setState(() => _status = 'Comprimiendo imagen en segundo plano…');
 
       final original = File(_picked!.path);
       final bytes = await original.readAsBytes();
       
       print('[CreateListing] Tamaño original: ${bytes.length} bytes (${(bytes.length / 1024).toStringAsFixed(1)} KB)');
       
-      final compressed = await FlutterImageCompress.compressWithList(
-        bytes, 
-        minWidth: 1024,
-        minHeight: 1024,
+      final compressed = await ImageProcessingService.instance.compressImageInIsolate(
+        imageBytes: bytes,
         quality: 80,
-        format: CompressFormat.jpeg,
+        maxWidth: 1920,
+        maxHeight: 1920,
       );
+      
+      if (compressed == null) {
+        throw Exception('Error al comprimir imagen');
+      }
       
       print('[CreateListing] Tamaño comprimido: ${compressed.length} bytes (${(compressed.length / 1024).toStringAsFixed(1)} KB)');
 
@@ -867,7 +871,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
         contentType: 'image/jpeg',
       );
 
-      setState(() { _busy = false; _status = 'Listo ✅'; });
+      setState(() { _busy = false; _status = 'Listo'; });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Listing publicado')));
         Navigator.of(context).pop();
