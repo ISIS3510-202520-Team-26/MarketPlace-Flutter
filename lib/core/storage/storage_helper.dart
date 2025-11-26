@@ -267,6 +267,8 @@ class StorageHelper {
     String? description,
     String? condition,
     Map<String, dynamic>? location,
+    String? imagePath,
+    bool? useLocation,
   }) async {
     final draft = {
       'title': title,
@@ -276,6 +278,8 @@ class StorageHelper {
       'description': description,
       'condition': condition,
       'location': location,
+      'imagePath': imagePath,
+      'useLocation': useLocation,
       'savedAt': DateTime.now().toIso8601String(),
     };
 
