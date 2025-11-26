@@ -11,6 +11,9 @@ import '../../data/models/listing.dart';
 import '../../data/models/price_suggestion.dart';
 import '../../core/telemetry/telemetry.dart';
 import '../../core/services/image_processing_isolate.dart';
+import '../../core/services/offline_listing_queue.dart';
+import '../../core/net/connectivity_service.dart';
+import '../../core/storage/storage_helper.dart';
 import '../../core/theme/theme_helper.dart';
 
 class CreateListingPage extends StatefulWidget {
@@ -23,9 +26,14 @@ class _CreateListingPageState extends State<CreateListingPage> {
   // Repositories
   final _listingsRepo = ListingsRepository();
   final _catalogRepo = CatalogRepository();
+  
+  // Services
+  final _offlineQueue = OfflineListingQueue.instance;
+  final _connectivity = ConnectivityService.instance;
+  final _storage = StorageHelper.instance;
 
   // UI
-final _title = TextEditingController();
+  final _title = TextEditingController();
   final _price = TextEditingController();
   XFile? _picked;
 
@@ -50,22 +58,187 @@ final _title = TextEditingController();
   PriceSuggestion? _priceSuggestion;
   bool _priceSuggestionApplied = false;
   bool _priceSuggestionBusy = false;
+  
+  // Telemetry tracking
+  DateTime? _formStartTime;
+  bool _formCompletedTracked = false;
+  bool _hadDraftOnLoad = false;
 
   @override
   void initState() {
     super.initState();
     _price.addListener(_onPriceChanged);
+    _title.addListener(_saveDraftDebounced);
+    _price.addListener(_saveDraftDebounced);
+    _loadDraft();
     _initLocation();
     _loadCategories();
-    Telemetry.i.view('create_listing'); // Telemetría: pantalla
+    Telemetry.i.view('create_listing');
+    _formStartTime = DateTime.now();
   }
 
   @override
   void dispose() {
+    _trackFormAbandonmentIfNeeded();
     _price.removeListener(_onPriceChanged);
+    _title.removeListener(_saveDraftDebounced);
+    _price.removeListener(_saveDraftDebounced);
     _title.dispose();
     _price.dispose();
     super.dispose();
+  }
+  
+  void _trackFormAbandonmentIfNeeded() {
+    if (_formCompletedTracked) {
+      return;
+    }
+
+    final hasTitle = _title.text.trim().isNotEmpty;
+    final hasPrice = _price.text.trim().isNotEmpty;
+    final hasImage = _picked != null;
+    final hasCategory = _categoryId != null;
+    final hasBrand = _brandId != null;
+
+    final hasAnyContent = hasTitle || hasPrice || hasImage || hasCategory || hasBrand;
+
+    String formState;
+    if (!hasAnyContent) {
+      formState = 'empty';
+    } else if (hasTitle && hasPrice && hasImage && hasCategory && hasBrand) {
+      formState = 'complete';
+    } else {
+      formState = 'partial';
+    }
+
+    final timeSpent = _formStartTime != null
+        ? DateTime.now().difference(_formStartTime!).inSeconds
+        : null;
+
+    Telemetry.i.formAbandoned(
+      formState: formState,
+      hasTitle: hasTitle,
+      hasPrice: hasPrice,
+      hasImage: hasImage,
+      hasCategory: hasCategory,
+      hasBrand: hasBrand,
+      timeSpentSeconds: timeSpent,
+    );
+
+    print('[CreateListing] Form abandoned - State: $formState, Time: ${timeSpent}s');
+  }
+  
+  Future<void> _loadDraft() async {
+    try {
+      final draft = await _storage.loadDraft();
+      if (draft == null) {
+        _hadDraftOnLoad = false;
+        Telemetry.i.formStarted();
+        return;
+      }
+      
+      _hadDraftOnLoad = true;
+      print('[CreateListing] Cargando borrador guardado...');
+      
+      if (mounted) {
+        setState(() {
+          if (draft['title'] != null) _title.text = draft['title'] as String;
+          if (draft['price'] != null) _price.text = draft['price'] as String;
+          if (draft['categoryId'] != null) _categoryId = draft['categoryId'] as String;
+          if (draft['brandId'] != null) _brandId = draft['brandId'] as String;
+          if (draft['useLocation'] != null) _useLocation = draft['useLocation'] as bool;
+          
+          // Cargar imagen guardada
+          if (draft['imagePath'] != null) {
+            final imagePath = draft['imagePath'] as String;
+            final imageFile = File(imagePath);
+            if (imageFile.existsSync()) {
+              _picked = XFile(imagePath);
+              print('[CreateListing] Imagen del borrador cargada: $imagePath');
+            } else {
+              print('[CreateListing] Imagen del borrador no existe en disco');
+            }
+          }
+        });
+        
+        print('[CreateListing] Borrador cargado exitosamente');
+      }
+    } catch (e) {
+      print('[CreateListing] Error al cargar borrador: $e');
+    }
+  }
+  
+  void _saveDraftDebounced() {
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) {
+        _saveDraft();
+      }
+    });
+  }
+  
+  Future<void> _saveDraft() async {
+    try {
+      final title = _title.text.trim();
+      final price = _price.text.trim();
+      
+      if (title.isEmpty && price.isEmpty && _picked == null) return;
+      
+      await _storage.saveDraft(
+        title: title,
+        price: price,
+        categoryId: _categoryId,
+        brandId: _brandId,
+        imagePath: _picked?.path,
+        useLocation: _useLocation,
+      );
+      
+      print('[CreateListing] Borrador guardado automaticamente');
+    } catch (e) {
+      print('[CreateListing] Error al guardar borrador: $e');
+    }
+  }
+  
+  Future<void> _clearDraft() async {
+    try {
+      await _storage.clearDraft();
+      print('[CreateListing] Borrador eliminado');
+    } catch (e) {
+      print('[CreateListing] Error al eliminar borrador: $e');
+    }
+  }
+  
+  Future<void> _resetForm() async {
+    try {
+      await _clearDraft();
+      
+      if (mounted) {
+        setState(() {
+          _title.clear();
+          _price.clear();
+          _picked = null;
+          _categoryId = null;
+          _brandId = null;
+          _useLocation = true;
+          _lat = null;
+          _lon = null;
+          _locMsg = null;
+          _priceSuggestion = null;
+          _priceSuggestionApplied = false;
+          _err = null;
+          _status = null;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Formulario restaurado'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        
+        print('[CreateListing] Formulario restaurado a valores por defecto');
+      }
+    } catch (e) {
+      print('[CreateListing] Error al restaurar formulario: $e');
+    }
   }
 
   // ---------- Helpers ----------
@@ -276,6 +449,35 @@ final _title = TextEditingController();
             fontSize: 20,
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Restaurar formulario',
+            onPressed: _busy ? null : () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Restaurar formulario'),
+                  content: const Text('Se perderán todos los datos del formulario. ¿Continuar?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancelar'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Restaurar'),
+                    ),
+                  ],
+                ),
+              );
+              
+              if (confirm == true) {
+                await _resetForm();
+              }
+            },
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -445,6 +647,7 @@ final _title = TextEditingController();
               Telemetry.i.click('change_category', props: {'category_id': v});
               setState(() => _categoryId = v);
               if (v != null) _loadBrandsForCategory(v);
+              _saveDraft();
             },
             decoration: _inputDecoration('Categoría').copyWith(
               suffixIcon: IconButton(
@@ -473,6 +676,7 @@ final _title = TextEditingController();
                   Telemetry.i.click('change_brand', props: {'brand_id': v});
                   setState(() => _brandId = v);
                   _maybeSuggestPrice();
+                  _saveDraft();
                 },
                 decoration: _inputDecoration('Marca').copyWith(
                   suffixIcon: IconButton(
@@ -509,6 +713,7 @@ final _title = TextEditingController();
                     Telemetry.i.click('toggle_location', props: {'enabled': v});
                     setState(() => _useLocation = v);
                     if (v) _initLocation();
+                    _saveDraft();
                   },
                   title: const Text('Adjuntar mi ubicación'),
                   subtitle: _locBusy
@@ -811,7 +1016,10 @@ final _title = TextEditingController();
 
   Future<void> _pickImage(ImageSource source) async {
     final img = await ImagePicker().pickImage(source: source, imageQuality: 95);
-    if (img != null) setState(() => _picked = img);
+    if (img != null) {
+      setState(() => _picked = img);
+      _saveDraft();
+    }
   }
 
   // ---------------------- SUBMIT ----------------------
@@ -822,71 +1030,175 @@ final _title = TextEditingController();
     if (_categoryId == null) { setState(() => _err = 'Selecciona o crea una categoría.'); return; }
     if (_brandId == null) { setState(() => _err = 'Selecciona o crea una marca.'); return; }
 
-    setState(() { _busy = true; _status = 'Creando listing…'; _err = null; });
+    setState(() { _busy = true; _status = 'Preparando publicación…'; _err = null; });
 
     try {
       final units = int.tryParse(_price.text.trim()) ?? 0;
       final priceCents = units * 100;
 
-      final newListing = Listing(
-        id: '', 
-        sellerId: '', 
-        title: _title.text.trim(),
-        description: null,
-        categoryId: _categoryId!,
-        brandId: _brandId,
-        priceCents: priceCents,
-        currency: 'COP',
-        condition: 'used',
-        quantity: 1,
-        isActive: true, 
-        latitude: _useLocation ? _lat : null,
-        longitude: _useLocation ? _lon : null,
-        priceSuggestionUsed: _priceSuggestionApplied,
-        quickViewEnabled: true,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-
-      final listing = await _listingsRepo.createListing(newListing);
-      
+      // Comprimir imagen primero
       setState(() => _status = 'Comprimiendo imagen en segundo plano…');
-
+      
       final original = File(_picked!.path);
       final bytes = await original.readAsBytes();
       
-      print('[CreateListing] Tamaño original: ${bytes.length} bytes (${(bytes.length / 1024).toStringAsFixed(1)} KB)');
+      print('[CreateListing] Tamaño original: ${bytes.length} bytes');
       
-      final compressed = await ImageProcessingService.instance.compressImageInIsolate(
-        imageBytes: bytes,
-        quality: 80,
-        maxWidth: 1920,
-        maxHeight: 1920,
-      );
-      
-      if (compressed == null) {
-        throw Exception('Error al comprimir imagen');
+      List<int> compressed;
+      try {
+        final compressedResult = await ImageProcessingService.instance.compressImageInIsolate(
+          imageBytes: bytes,
+          quality: 85,
+          maxWidth: 1920,
+          maxHeight: 1920,
+        );
+        
+        if (compressedResult != null && compressedResult.isNotEmpty) {
+          compressed = compressedResult;
+          print('[CreateListing] Tamaño comprimido: ${compressed.length} bytes');
+        } else {
+          print('[CreateListing] Compresión falló, usando imagen original');
+          compressed = bytes;
+        }
+      } catch (e) {
+        print('[CreateListing] Error al comprimir ($e), usando imagen original');
+        compressed = bytes;
       }
-      
-      print('[CreateListing] Tamaño comprimido: ${compressed.length} bytes (${(compressed.length / 1024).toStringAsFixed(1)} KB)');
 
-      setState(() => _status = 'Subiendo imagen… (${(compressed.length / 1024).toStringAsFixed(0)} KB)');
+      // Verificar conectividad
+      final isOnline = await _connectivity.isOnline;
 
-      await _listingsRepo.uploadListingImage(
-        listingId: listing.id,
+      if (isOnline) {
+        print('[CreateListing] Conexión detectada, subiendo directamente...');
+        setState(() => _status = 'Subiendo publicación…');
+        
+        try {
+          await _uploadDirectly(
+            title: _title.text.trim(),
+            categoryId: _categoryId!,
+            brandId: _brandId,
+            priceCents: priceCents,
+            compressed: compressed,
+          );
+          
+          // Éxito - Telemetría y limpieza
+          _formCompletedTracked = true;
+          final timeSpent = _formStartTime != null
+              ? DateTime.now().difference(_formStartTime!).inSeconds
+              : null;
+          Telemetry.i.formCompleted(
+            hadDraft: _hadDraftOnLoad,
+            timeSpentSeconds: timeSpent,
+          );
+          
+          await _clearDraft();
+          setState(() { _busy = false; _status = 'Listo'; });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Publicación subida exitosamente'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.of(context).pop();
+          }
+          return;
+          
+        } catch (e) {
+          print('[CreateListing] Error al subir directamente: $e');
+          print('[CreateListing] Guardando en cola offline...');
+          setState(() => _status = 'Error de conexión, guardando para subir después…');
+        }
+      } else {
+        print('[CreateListing] Sin conexión, guardando en cola offline...');
+        setState(() => _status = 'Sin conexión, guardando para subir después…');
+      }
+
+      // Guardar en cola offline
+      final queueId = await _offlineQueue.enqueue(
+        title: _title.text.trim(),
+        categoryId: _categoryId!,
+        brandId: _brandId,
+        priceCents: priceCents,
+        latitude: _useLocation ? _lat : null,
+        longitude: _useLocation ? _lon : null,
+        priceSuggestionUsed: _priceSuggestionApplied,
         imageBytes: compressed,
-        filename: _picked!.name,
-        contentType: 'image/jpeg',
+        imageName: _picked!.name,
+        imageContentType: 'image/jpeg',
       );
 
-      setState(() { _busy = false; _status = 'Listo'; });
+      print('[CreateListing] Publicación guardada en cola: $queueId');
+
+      _formCompletedTracked = true;
+      final timeSpent = _formStartTime != null
+          ? DateTime.now().difference(_formStartTime!).inSeconds
+          : null;
+      Telemetry.i.formCompleted(
+        hadDraft: _hadDraftOnLoad,
+        timeSpentSeconds: timeSpent,
+      );
+
+      await _clearDraft();
+      setState(() { _busy = false; _status = null; });
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Listing publicado')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Publicación guardada. Se subirá automáticamente cuando haya conexión.'),
+            backgroundColor: Colors.orange.shade700,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
         Navigator.of(context).pop();
       }
     } catch (e) {
-      setState(() { _busy = false; _status = null; _err = 'Error al publicar: $e'; });
+      setState(() { _busy = false; _status = null; _err = 'Error al procesar: $e'; });
     }
+  }
+  
+  Future<void> _uploadDirectly({
+    required String title,
+    required String categoryId,
+    String? brandId,
+    required int priceCents,
+    required List<int> compressed,
+  }) async {
+    final newListing = Listing(
+      id: '', 
+      sellerId: '', 
+      title: title,
+      description: null,
+      categoryId: categoryId,
+      brandId: brandId,
+      priceCents: priceCents,
+      currency: 'COP',
+      condition: 'used',
+      quantity: 1,
+      isActive: true, 
+      latitude: _useLocation ? _lat : null,
+      longitude: _useLocation ? _lon : null,
+      priceSuggestionUsed: _priceSuggestionApplied,
+      quickViewEnabled: true,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final listing = await _listingsRepo.createListing(newListing);
+    
+    setState(() => _status = 'Subiendo imagen…');
+
+    await _listingsRepo.uploadListingImage(
+      listingId: listing.id,
+      imageBytes: compressed,
+      filename: _picked!.name,
+      contentType: 'image/jpeg',
+    );
   }
 }
 

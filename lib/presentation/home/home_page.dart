@@ -22,6 +22,7 @@ import '../../core/services/cart_service.dart';
 import '../../core/services/preload_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_helper.dart';
+import '../widgets/pending_uploads_banner.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -1049,6 +1050,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     children: [
                       const SizedBox(height: 4),
+                      const PendingUploadsBanner(),
                       if (dwellCta != null) ...[
                         dwellCta,
                         const SizedBox(height: 12),

@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'package:uuid/uuid.dart';
 import '../../data/repositories/telemetry_repository.dart';
-import '../../data/models/event.dart';
 import '../storage/telemetry_storage_service.dart';
 
 /// Singleton for centralized telemetry tracking.
@@ -35,7 +34,6 @@ class Telemetry {
   bool _initialized = false;
 
   static const int _maxBatch = 20;
-  static const Duration _maxDelay = Duration(seconds: 10);
   static const Duration _syncInterval = Duration(minutes: 2);
 
   /// Inicializa el servicio de telemetría con el userId y sessionId
@@ -259,6 +257,58 @@ class Telemetry {
         'category_name': categoryName,
         'duration_seconds': durationSeconds,
         if (itemsViewed != null) 'items_viewed': itemsViewed,
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    });
+  }
+  
+  // ==================== Form Abandonment Tracking ====================
+  
+  /// Tracking de inicio del formulario de creación de listing
+  void formStarted() {
+    _saveEventToStorage({
+      'event_type': 'listing.form.started',
+      'properties': {
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    });
+  }
+  
+  /// Tracking de abandono del formulario de creación de listing
+  void formAbandoned({
+    required String formState,
+    required bool hasTitle,
+    required bool hasPrice,
+    required bool hasImage,
+    required bool hasCategory,
+    required bool hasBrand,
+    int? timeSpentSeconds,
+  }) {
+    _saveEventToStorage({
+      'event_type': 'listing.form.abandoned',
+      'properties': {
+        'form_state': formState,
+        'has_title': hasTitle,
+        'has_price': hasPrice,
+        'has_image': hasImage,
+        'has_category': hasCategory,
+        'has_brand': hasBrand,
+        if (timeSpentSeconds != null) 'time_spent_seconds': timeSpentSeconds,
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    });
+  }
+  
+  /// Tracking de completado del formulario de creación de listing
+  void formCompleted({
+    required bool hadDraft,
+    int? timeSpentSeconds,
+  }) {
+    _saveEventToStorage({
+      'event_type': 'listing.form.completed',
+      'properties': {
+        'had_draft': hadDraft,
+        if (timeSpentSeconds != null) 'time_spent_seconds': timeSpentSeconds,
         'timestamp': DateTime.now().toIso8601String(),
       },
     });
