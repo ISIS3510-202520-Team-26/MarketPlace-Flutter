@@ -109,6 +109,31 @@ class OfflineCatalogRepository with OfflineRepositoryMixin {
     );
   }
 
+  /// Crea una nueva categoría (requiere conexión)
+  Future<Category> createCategory({
+    required String name,
+    String? slug,
+  }) async {
+    final category = await _apiRepo.createCategory(name: name, slug: slug);
+    await _localDb.saveCategories([category]);
+    return category;
+  }
+
+  /// Crea una nueva marca (requiere conexión)
+  Future<Brand> createBrand({
+    required String name,
+    required String categoryId,
+    String? slug,
+  }) async {
+    final brand = await _apiRepo.createBrand(
+      name: name,
+      categoryId: categoryId,
+      slug: slug,
+    );
+    await _localDb.saveBrands([brand]);
+    return brand;
+  }
+
   /// Acceso directo a la BD local (útil para debug)
   LocalDatabaseService get localDatabase => _localDb;
 

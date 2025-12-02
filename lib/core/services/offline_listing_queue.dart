@@ -9,6 +9,10 @@ import '../../data/models/listing.dart';
 import '../../data/repositories/listings_repository.dart';
 import '../net/connectivity_service.dart';
 
+/// Sistema de Cola Offline para Publicaciones
+/// 
+/// Permite crear publicaciones sin conexión y subirlas automáticamente
+/// cuando se detecta conectividad.
 class OfflineListingQueue {
   OfflineListingQueue._();
   static final OfflineListingQueue instance = OfflineListingQueue._();
@@ -17,18 +21,13 @@ class OfflineListingQueue {
   final _connectivity = ConnectivityService.instance;
   final _uuid = const Uuid();
   
-  // Key para SharedPreferences
   static const _queueKey = 'offline_listing_queue';
   
-  // Listeners para notificar cambios
   final _listeners = <VoidCallback>[];
-  
-  // Estado de la cola
   List<PendingListing> _queue = [];
   bool _isProcessing = false;
   Timer? _retryTimer;
 
-  /// Inicializa el servicio y carga la cola desde disco
   Future<void> initialize() async {
     print('[OfflineQueue] Inicializando cola de publicaciones offline...');
     await _loadQueue();
@@ -36,17 +35,14 @@ class OfflineListingQueue {
     print('[OfflineQueue] Cola inicializada con ${_queue.length} publicaciones pendientes');
   }
 
-  /// Agrega un listener para cambios en la cola
   void addListener(VoidCallback listener) {
     _listeners.add(listener);
   }
 
-  /// Remueve un listener
   void removeListener(VoidCallback listener) {
     _listeners.remove(listener);
   }
 
-  /// Notifica a todos los listeners
   void _notifyListeners() {
     for (final listener in _listeners) {
       try {
@@ -58,11 +54,9 @@ class OfflineListingQueue {
   }
 
   List<PendingListing> get pendingListings => List.unmodifiable(_queue);
-
   int get pendingCount => _queue.where((l) => !l.isCompleted).length;
   bool get hasUploading => _queue.any((l) => l.isUploading);
 
-  ///Future + async/await
   Future<String> enqueue({
     required String title,
     String? description,
@@ -84,7 +78,6 @@ class OfflineListingQueue {
     final id = _uuid.v4();
     final now = DateTime.now();
     
-    // Convertir imagen a base64 si existe
     String? imageBase64;
     if (imageBytes != null) {
       try {
@@ -122,13 +115,11 @@ class OfflineListingQueue {
     _notifyListeners();
     
     print('[OfflineQueue] Publicación agregada: $id');
-    
     _processQueueInBackground();
     
     return id;
   }
 
-  // Future con async/await + handlers (try-catch)
   void _processQueueInBackground() {
     if (_isProcessing) {
       print('[OfflineQueue] Ya hay un proceso en ejecución');
@@ -142,8 +133,6 @@ class OfflineListingQueue {
     });
   }
 
-  // Future + async/await + handlers (try-catch)
-
   Future<void> processQueue() async {
     if (_isProcessing) {
       print('[OfflineQueue] Procesamiento ya en curso');
@@ -155,7 +144,6 @@ class OfflineListingQueue {
       return;
     }
     
-    // Verificar conectividad primero
     final isOnline = await _connectivity.isOnline;
     if (!isOnline) {
       print('[OfflineQueue] Sin conexión, esperando...');
@@ -166,14 +154,10 @@ class OfflineListingQueue {
     print('[OfflineQueue] Iniciando procesamiento de ${_queue.length} publicaciones...');
     
     try {
-      // Procesar cada publicación pendiente
       for (var i = 0; i < _queue.length; i++) {
         final pending = _queue[i];
         
-        // Saltar si ya está completada
         if (pending.isCompleted) continue;
-        
-        // Saltar si ya no debe reintentarse
         if (!pending.shouldRetry) {
           print('[OfflineQueue] Saltando ${pending.id} (max intentos alcanzado)');
           continue;
@@ -181,7 +165,6 @@ class OfflineListingQueue {
         
         print('[OfflineQueue] Procesando: ${pending.title} (intento ${pending.attemptCount + 1})');
         
-        // Actualizar estado a "uploading"
         _queue[i] = pending.copyWith(
           status: 'uploading',
           lastAttemptAt: DateTime.now(),
@@ -189,38 +172,36 @@ class OfflineListingQueue {
         await _saveQueue();
         _notifyListeners();
         
-        // Intentar subir con manejo de errores
+        final currentPending = _queue[i];
+        
         try {
-          await _uploadPendingListing(pending);
+          await _uploadPendingListing(currentPending);
           
-          // Éxito: marcar como completado
-          _queue[i] = pending.copyWith(
+          _queue[i] = currentPending.copyWith(
             status: 'completed',
-            attemptCount: pending.attemptCount + 1,
+            attemptCount: currentPending.attemptCount + 1,
             lastAttemptAt: DateTime.now(),
           );
           
-          print('[OfflineQueue] Publicación subida exitosamente: ${pending.title}');
+          print('[OfflineQueue] Publicación subida exitosamente: ${currentPending.title}');
           
         } catch (e) {
-          // Error: incrementar contador y marcar como failed
-          final newAttemptCount = pending.attemptCount + 1;
+          final newAttemptCount = currentPending.attemptCount + 1;
           final shouldRetry = newAttemptCount < 5;
           
-          _queue[i] = pending.copyWith(
+          _queue[i] = currentPending.copyWith(
             status: shouldRetry ? 'pending' : 'failed',
             attemptCount: newAttemptCount,
             lastAttemptAt: DateTime.now(),
             errorMessage: e.toString(),
           );
           
-          print('[OfflineQueue] Error al subir ${pending.title}: $e');
+          print('[OfflineQueue] Error al subir ${currentPending.title}: $e');
           print('[OfflineQueue] Intentos: $newAttemptCount/5');
         }
         
         await _saveQueue();
         _notifyListeners();
-        
         await Future.delayed(const Duration(milliseconds: 500));
       }
   
@@ -234,7 +215,6 @@ class OfflineListingQueue {
     }
   }
 
-  /// Future + async/await + handlers (try-catch)
   Future<void> _uploadPendingListing(PendingListing pending) async {
     final listing = Listing(
       id: '',
@@ -290,7 +270,6 @@ class OfflineListingQueue {
     
     _queue.removeWhere((listing) {
       if (!listing.isCompleted) return false;
-      
       final age = now.difference(listing.lastAttemptAt);
       return age.inHours > 24;
     });
@@ -303,7 +282,6 @@ class OfflineListingQueue {
     }
   }
 
-  /// Elimina una publicación de la cola
   Future<void> remove(String id) async {
     final before = _queue.length;
     _queue.removeWhere((l) => l.id == id);
@@ -315,7 +293,6 @@ class OfflineListingQueue {
     }
   }
 
-  /// Reintenta una publicación fallida manualmente
   Future<void> retry(String id) async {
     final index = _queue.indexWhere((l) => l.id == id);
     if (index == -1) return;
@@ -333,7 +310,6 @@ class OfflineListingQueue {
     _processQueueInBackground();
   }
 
-  /// Guarda la cola en SharedPreferences
   Future<void> _saveQueue() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -346,7 +322,6 @@ class OfflineListingQueue {
     }
   }
 
-  /// Carga la cola desde SharedPreferences
   Future<void> _loadQueue() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -369,7 +344,6 @@ class OfflineListingQueue {
     }
   }
 
-  /// Limpia toda la cola (usar con precaución)
   Future<void> clearAll() async {
     _queue.clear();
     await _saveQueue();
@@ -377,11 +351,9 @@ class OfflineListingQueue {
     print('[OfflineQueue] Cola limpiada completamente');
   }
 
-  /// Detiene el servicio y limpia recursos
   void dispose() {
     _retryTimer?.cancel();
     _listeners.clear();
     print('[OfflineQueue] Servicio detenido');
   }
 }
-
