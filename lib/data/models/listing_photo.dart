@@ -15,6 +15,9 @@ class ListingPhoto {
   /// URL de la imagen (opcional, puede ser generada on-demand)
   final String? imageUrl;
   
+  /// URL de preview (alias para imageUrl, usado en algunos endpoints)
+  String? get previewUrl => imageUrl;
+  
   /// Ancho de la imagen en píxeles (opcional)
   final int? width;
   
@@ -40,7 +43,7 @@ class ListingPhoto {
       id: (json['id'] ?? json['uuid']).toString(),
       listingId: (json['listing_id'] ?? json['listingId']).toString(),
       storageKey: json['storage_key'] as String,
-      imageUrl: json['image_url']?.toString(),
+      imageUrl: (json['image_url'] ?? json['preview_url'])?.toString(),
       width: (json['width'] as num?)?.toInt(),
       height: (json['height'] as num?)?.toInt(),
       createdAt: DateTime.parse(json['created_at'] as String),

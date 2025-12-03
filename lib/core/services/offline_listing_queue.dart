@@ -23,6 +23,9 @@ class OfflineListingQueue {
   
   static const _queueKey = 'offline_listing_queue';
   
+  // Aumentado de 5 a 15 intentos para dar más oportunidades
+  static const int maxAttempts = 15;
+  
   final _listeners = <VoidCallback>[];
   List<PendingListing> _queue = [];
   bool _isProcessing = false;
@@ -187,7 +190,7 @@ class OfflineListingQueue {
           
         } catch (e) {
           final newAttemptCount = currentPending.attemptCount + 1;
-          final shouldRetry = newAttemptCount < 5;
+          final shouldRetry = newAttemptCount < maxAttempts;
           
           _queue[i] = currentPending.copyWith(
             status: shouldRetry ? 'pending' : 'failed',
@@ -197,7 +200,7 @@ class OfflineListingQueue {
           );
           
           print('[OfflineQueue] Error al subir ${currentPending.title}: $e');
-          print('[OfflineQueue] Intentos: $newAttemptCount/5');
+          print('[OfflineQueue] Intentos: $newAttemptCount/$maxAttempts');
         }
         
         await _saveQueue();
@@ -298,15 +301,21 @@ class OfflineListingQueue {
     if (index == -1) return;
     
     final pending = _queue[index];
+    
+    // Resetear el contador de intentos a 0 para dar nuevas oportunidades
     _queue[index] = pending.copyWith(
       status: 'pending',
+      attemptCount: 0, // ← RESETEAR A 0
       errorMessage: null,
+      lastAttemptAt: DateTime.now(),
     );
     
     await _saveQueue();
     _notifyListeners();
     
-    print('[OfflineQueue] Reintentando publicación: $id');
+    print('[OfflineQueue] Reintentando publicación: $id (contador reseteado a 0)');
+    
+    // Forzar procesamiento inmediato
     _processQueueInBackground();
   }
 

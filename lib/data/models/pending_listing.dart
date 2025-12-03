@@ -161,7 +161,10 @@ class PendingListing {
     }
   }
 
-  bool get shouldRetry => attemptCount < 5 && status != 'completed';
+  // Límite máximo de intentos (debe coincidir con OfflineListingQueue.maxAttempts)
+  static const int maxAttempts = 15;
+
+  bool get shouldRetry => attemptCount < maxAttempts && status != 'completed';
 
   bool get isUploading => status == 'uploading';
 

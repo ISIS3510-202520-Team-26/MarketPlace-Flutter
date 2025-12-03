@@ -3,6 +3,7 @@ import '../models/listing.dart';
 import '../models/listing_photo.dart';
 import '../models/price_suggestion.dart';
 import '../../core/net/dio_client.dart';
+import 'auth_repository.dart';
 
 /// Repository para el dominio de Listings
 /// 
@@ -74,6 +75,7 @@ class ListingsRepository {
   /// - Búsqueda por texto (q)
   /// - Filtro por categoría
   /// - Filtro por marca
+  /// - Filtro por vendedor (seller_id)
   /// - Rango de precios
   /// - Búsqueda geográfica (near_lat, near_lon, radius_km)
   /// - Paginación
@@ -81,6 +83,7 @@ class ListingsRepository {
     String? q,
     String? categoryId,
     String? brandId,
+    String? sellerId,
     int? minPrice,
     int? maxPrice,
     double? nearLat,
@@ -98,6 +101,7 @@ class ListingsRepository {
       if (q != null && q.isNotEmpty) queryParams['q'] = q;
       if (categoryId != null) queryParams['category_id'] = categoryId;
       if (brandId != null) queryParams['brand_id'] = brandId;
+      if (sellerId != null) queryParams['seller_id'] = sellerId;
       if (minPrice != null) queryParams['min_price'] = minPrice;
       if (maxPrice != null) queryParams['max_price'] = maxPrice;
       if (nearLat != null) queryParams['near_lat'] = nearLat;
@@ -152,14 +156,14 @@ class ListingsRepository {
     try {
       print('[ListingsRepo] 📊 Obteniendo estadísticas del usuario...');
       
-      // Obtener todos los listings del usuario actual (sin filtros)
-      // El backend filtra automáticamente por el usuario autenticado
-      final result = await searchListings(
+      // Obtener todos los listings del usuario actual
+      // Usa getMyListings que filtra automáticamente por seller_id
+      final result = await getMyListings(
         page: 1,
         pageSize: 100, // Obtener hasta 100 listings
       );
       
-      print('[ListingsRepo] ✅ Se obtuvieron ${result.items.length} listings');
+      print('[ListingsRepo] Se obtuvieron ${result.items.length} listings del usuario');
       
       // Filtrar listings activos
       final activeListings = result.items.where((l) => l.isActive).toList();
@@ -192,8 +196,57 @@ class ListingsRepository {
         viewsCount: viewsCount,
       );
     } on DioException catch (e) {
-      print('[ListingsRepo] ❌ Error al obtener estadísticas: ${e.message}');
+      print('[ListingsRepo] Error al obtener estadísticas: ${e.message}');
       throw _handleError(e, 'Error al obtener estadísticas del usuario');
+    }
+  }
+
+  /// Obtiene todos los listings del usuario actual
+  /// 
+  /// GET /listings?seller_id={current_user_id}
+  /// 
+  /// Filtra las publicaciones por el seller_id del usuario autenticado
+  Future<ListingsPage> getMyListings({
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    try {
+      print('[ListingsRepo] Obteniendo mis publicaciones (página $page)...');
+      
+      // Obtener el ID del usuario autenticado
+      final authRepo = AuthRepository();
+      final currentUser = await authRepo.getCurrentUser();
+      
+      print('[ListingsRepo] Usuario actual: ${currentUser.id} (${currentUser.name})');
+      
+      // Buscar listings filtrando por seller_id del usuario actual
+      final result = await searchListings(
+        sellerId: currentUser.id,
+        page: page,
+        pageSize: pageSize,
+      );
+      
+      print('[ListingsRepo] Se obtuvieron ${result.items.length} publicaciones del usuario');
+      
+      // Verificación adicional: filtrar localmente por si el backend no soporta seller_id
+      final myListings = result.items.where((listing) {
+        return listing.sellerId == currentUser.id;
+      }).toList();
+      
+      if (myListings.length != result.items.length) {
+        print('[ListingsRepo] Filtrado local: ${result.items.length} -> ${myListings.length} publicaciones');
+      }
+      
+      return ListingsPage(
+        items: myListings,
+        total: myListings.length,
+        page: result.page,
+        pageSize: result.pageSize,
+        hasNext: myListings.length >= pageSize,
+      );
+    } on DioException catch (e) {
+      print('[ListingsRepo] Error al obtener mis publicaciones: ${e.message}');
+      throw _handleError(e, 'Error al obtener mis publicaciones');
     }
   }
 

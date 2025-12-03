@@ -6,6 +6,7 @@ import '../../presentation/preloading/preloading_page.dart';
 import '../../presentation/home/home_page.dart';
 import '../../presentation/listings/create_listing_page.dart';
 import '../../presentation/listings/listing_detail_page.dart';
+import '../../presentation/listings/my_listings_page.dart';
 import '../../presentation/profile/profile_page.dart';
 import '../../presentation/profile/profile_stats_page.dart';
 import '../../presentation/cart/cart_page.dart';
@@ -21,7 +22,7 @@ class AppRouter {
       GoRoute(path: '/preloading', builder: (c, s) => const PreloadingPage()),
       GoRoute(path: '/', builder: (c, s) => const HomePage()),
       GoRoute(path: '/listings/create', builder: (c, s) => const CreateListingPage()),
-      // 🆕 Detalle
+      GoRoute(path: '/listings/my', builder: (c, s) => const MyListingsPage()),
       GoRoute(
         path: '/listings/:id',
         builder: (c, s) {
