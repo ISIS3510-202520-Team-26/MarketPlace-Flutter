@@ -6,7 +6,7 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../data/repositories/listings_repository.dart';
-import '../../data/repositories/catalog_repository.dart';
+import '../../data/repositories/offline_catalog_repository.dart';
 import '../../data/models/listing.dart';
 import '../../data/models/price_suggestion.dart';
 import '../../core/telemetry/telemetry.dart';
@@ -25,7 +25,7 @@ class CreateListingPage extends StatefulWidget {
 class _CreateListingPageState extends State<CreateListingPage> {
   // Repositories
   final _listingsRepo = ListingsRepository();
-  final _catalogRepo = CatalogRepository();
+  final _catalogRepo = OfflineCatalogRepository();
   
   // Services
   final _offlineQueue = OfflineListingQueue.instance;

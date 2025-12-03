@@ -489,9 +489,7 @@ class _ProfilePageState extends State<ProfilePage> {
             color: colors.primary,
             onTap: () {
               Telemetry.i.click('profile_my_listings');
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Próximamente: Mis publicaciones')),
-              );
+              context.push('/listings/my');
             },
           ),
           const Divider(height: 1, indent: 56),
@@ -540,8 +538,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   /// Sección de configuración
   Widget _buildSettingsSection() {
-    final colors = context.colors;
-    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
