@@ -108,55 +108,107 @@ class OrdersRepository {
 
   // ==================== ORDER STATUS TRANSITIONS ====================
 
-  /// Paga una orden
+  // ============================================================================
+  // SP4: ASYNC/AWAIT CON BACKEND - TRANSICIÓN DE ESTADO: PAGO
+  // ============================================================================
+  
+  /// Paga una orden usando ASYNC/AWAIT
   /// 
   /// POST /orders/{id}/pay
+  /// 
+  /// IMPLEMENTACIÓN SP4: Demuestra async/await con Backend endpoint
   /// 
   /// Transición: created -> paid
   /// - Autoriza el pago
   /// - Captura el pago
   /// - Crea escrow y lo marca como funded
+  /// 
+  /// Backend: OrderService.pay() en Backend/app/services/order_service.py
   Future<Order> payOrder(String orderId) async {
     try {
+      // SP4: await POST al endpoint de pago
+      print('SP4: Procesando pago de orden $orderId...');
+      
       final response = await _dio.post('/orders/$orderId/pay');
-      return Order.fromJson(response.data as Map<String, dynamic>);
+      
+      // SP4: Orden pagada exitosamente
+      final order = Order.fromJson(response.data as Map<String, dynamic>);
+      print('SP4: Orden pagada - Estado: ${order.status}');
+      
+      return order;
     } on DioException catch (e) {
+      // SP4: Error en pago
+      print('SP4: Error al pagar orden: ${e.message}');
       throw _handleError(e, 'Error al pagar orden');
     }
   }
 
-  /// Completa una orden
+  // ============================================================================
+  // SP4: ASYNC/AWAIT CON BACKEND - TRANSICIÓN DE ESTADO: COMPLETAR
+  // ============================================================================
+  
+  /// Completa una orden usando ASYNC/AWAIT
   /// 
   /// POST /orders/{id}/complete
   /// 
+  /// IMPLEMENTACIÓN SP4: Demuestra async/await con Backend endpoint
+  /// 
   /// Transición: shipped -> completed
+  /// Backend: OrderService.complete() en Backend/app/services/order_service.py
   Future<Order> completeOrder(String orderId) async {
     try {
+      // SP4: await POST al endpoint de completar
+      print('SP4: Completando orden $orderId...');
+      
       final response = await _dio.post('/orders/$orderId/complete');
-      return Order.fromJson(response.data as Map<String, dynamic>);
+      
+      // SP4: Orden completada
+      final order = Order.fromJson(response.data as Map<String, dynamic>);
+      print('SP4: Orden completada - Estado: ${order.status}');
+      
+      return order;
     } on DioException catch (e) {
+      // SP4: Error al completar
+      print('SP4: Error al completar orden: ${e.message}');
       throw _handleError(e, 'Error al completar orden');
     }
   }
 
-  /// Cancela una orden
+  // ============================================================================
+  // SP4: ASYNC/AWAIT CON BACKEND - TRANSICIÓN DE ESTADO: CANCELAR
+  // ============================================================================
+  
+  /// Cancela una orden usando ASYNC/AWAIT
   /// 
   /// POST /orders/{id}/cancel
   /// 
+  /// IMPLEMENTACIÓN SP4: Demuestra async/await con parámetros opcionales
+  /// 
   /// Transición: * -> cancelled
   /// - Reembolsa el pago si fue capturado
+  /// Backend: OrderService.cancel() en Backend/app/services/order_service.py
   Future<Order> cancelOrder(String orderId, {String? reason}) async {
     try {
+      // SP4: Construcción de payload con reason opcional
       final data = <String, dynamic>{};
       if (reason != null) data['reason'] = reason;
+      
+      // SP4: await POST al endpoint de cancelar
+      print('SP4: Cancelando orden $orderId${reason != null ? " (razón: $reason)" : ""}...');
       
       final response = await _dio.post(
         '/orders/$orderId/cancel',
         data: data.isNotEmpty ? data : null,
       );
       
-      return Order.fromJson(response.data as Map<String, dynamic>);
+      // SP4: Orden cancelada
+      final order = Order.fromJson(response.data as Map<String, dynamic>);
+      print('SP4: Orden cancelada - Estado: ${order.status}');
+      
+      return order;
     } on DioException catch (e) {
+      // SP4: Error al cancelar
+      print('SP4: Error al cancelar orden: ${e.message}');
       throw _handleError(e, 'Error al cancelar orden');
     }
   }
@@ -391,6 +443,55 @@ class OrdersRepository {
     } catch (e) {
       throw 'Error al calcular rating del usuario: $e';
     }
+  }
+
+  // ============================================================================
+  // SP4: FUTURE CON HANDLERS - FLUJO COMPLETO DE ORDEN
+  // ============================================================================
+  
+  /// Procesa el flujo completo de una orden: crear -> pagar -> completar
+  /// 
+  /// IMPLEMENTACIÓN SP4: Demuestra encadenamiento de Future con .then()
+  /// 
+  /// Flujo:
+  /// 1. createOrder() retorna Future<Order>
+  /// 2. .then() recibe la orden y llama payOrder()
+  /// 3. .then() recibe orden pagada y llama completeOrder()
+  /// 4. .catchError() maneja cualquier error en la cadena
+  /// 
+  /// Este patrón es útil para flujos secuenciales sin async/await.
+  Future<Order> processFullOrderFlowWithHandlers({
+    required String listingId,
+    int quantity = 1,
+  }) {
+    // SP4: Paso 1 - Crear orden
+    print('SP4: INICIO DE FLUJO CON HANDLERS');
+    print('SP4: Paso 1/3 - Creando orden...');
+    
+    return createOrder(listingId: listingId, quantity: quantity)
+        .then((createdOrder) {
+          // SP4: Handler 1 - Orden creada, ahora pagar
+          print('SP4: Paso 1/3 completado - Orden creada: ${createdOrder.id}');
+          print('SP4: Paso 2/3 - Procesando pago...');
+          return payOrder(createdOrder.id);
+        })
+        .then((paidOrder) {
+          // SP4: Handler 2 - Orden pagada, ahora completar
+          print('SP4: Paso 2/3 completado - Orden pagada');
+          print('SP4: Paso 3/3 - Completando orden...');
+          return completeOrder(paidOrder.id);
+        })
+        .then((completedOrder) {
+          // SP4: Handler final - Orden completada
+          print('SP4: Paso 3/3 completado - Orden completada');
+          print('SP4: FLUJO FINALIZADO EXITOSAMENTE');
+          return completedOrder;
+        })
+        .catchError((error) {
+          // SP4: Handler de error global
+          print('SP4: ERROR EN FLUJO: $error');
+          throw Exception('Error en flujo de orden: $error');
+        });
   }
 
   // ==================== HELPERS ====================

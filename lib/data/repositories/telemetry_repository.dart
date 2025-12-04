@@ -229,7 +229,7 @@ class TelemetryRepository {
         'error_type': errorType,
         'message': message,
         if (stackTrace != null) 'stack_trace': stackTrace,
-        if (screen != null) 'screen': screen ?? _currentScreen,
+        'screen': screen ?? _currentScreen,
       },
     );
   }

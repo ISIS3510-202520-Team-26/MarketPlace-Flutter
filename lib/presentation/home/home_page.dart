@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -8,11 +9,15 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../data/repositories/listings_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../data/repositories/telemetry_repository.dart';
 import '../../data/repositories/auth_repository.dart';
+import '../../data/repositories/local_sync_repository.dart'; // SP4 HOME: SQLite sync
+import '../../data/repositories/hive_repository.dart'; // SP4 HOME: Hive cache
+import '../../data/services/analytics_isolate_service.dart'; // SP4 HOME: Isolates
 import '../../core/telemetry/telemetry.dart';
 import '../../core/ux/ux_hints.dart';
 import '../../core/storage/storage.dart';
@@ -36,6 +41,11 @@ class _HomePageState extends State<HomePage> {
   final _catalogRepo = CatalogRepository();
   final _telemetryRepo = TelemetryRepository();
   final _authRepo = AuthRepository();
+  
+  // -------- SP4 HOME: SQLite + Hive + Isolates --------
+  final _localSync = LocalSyncRepository(baseUrl: 'http://3.19.208.242:8000/v1'); // SP4 HOME: SQLite cache
+  final _hiveRepo = HiveRepository(baseUrl: 'http://3.19.208.242:8000/v1'); // SP4 HOME: Hive cache
+  final _analyticsIsolate = AnalyticsIsolateService(); // SP4 HOME: Background processing
 
   // -------- Storage Services --------
   final _storage = StorageHelper.instance;
@@ -70,8 +80,14 @@ class _HomePageState extends State<HomePage> {
   // cache fotos
   final Map<String, String> _photoUrlCache = {};
 
+  // -------- Favoritos --------
+  Set<String> _favoriteIds = {};
+
   // -------- UX desde BQs --------
   UxHints _hints = const UxHints();
+  
+  // -------- SP4 HOME: Analytics Isolate state --------
+  bool _processingAnalytics = false;
 
   // -------- CTAs por tiempo --------
   List<String> _ctaPriority = const ['search', 'publish', 'auth']; // fallback
@@ -99,6 +115,7 @@ class _HomePageState extends State<HomePage> {
     _cartService.addListener(_onCartChanged); // Escuchar cambios del carrito
     _cacheUserProfileInBackground(); // Cachear perfil en segundo plano
     _listenToDataUpdates(); // Escuchar actualizaciones mediante Stream
+    _loadFavorites(); // Cargar favoritos
   }
   
   void _onCartChanged() {
@@ -297,12 +314,28 @@ class _HomePageState extends State<HomePage> {
       // (se actualizarán más tarde si hay internet)
       _preloadListingDetailsFromCache();
     } else {
-      // No hay cache, mostrar loading
-      print('[HomePage] ⏳ No hay cache, mostrando loading...');
-      if (mounted) {
-        setState(() {
-          _loading = true;
-        });
+      // SP4 HOME: Intentar cargar desde SQLite antes de mostrar loading
+      print('[SP4 HOME] 📊 No hay cache StorageHelper, intentando SQLite...');
+      final sqliteListings = await _loadFromSQLiteCache();
+      
+      if (sqliteListings.isNotEmpty) {
+        print('[SP4 HOME] ✅ ${sqliteListings.length} listings cargados desde SQLite');
+        _all = sqliteListings.map((it) => _augmentListing(it)).toList();
+        _applyFilters();
+        
+        if (mounted) {
+          setState(() {
+            _loading = false;
+          });
+        }
+      } else {
+        // No hay cache, mostrar loading
+        print('[HomePage] ⏳ No hay cache, mostrando loading...');
+        if (mounted) {
+          setState(() {
+            _loading = true;
+          });
+        }
       }
     }
 
@@ -1534,30 +1567,40 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AspectRatio(
-              aspectRatio: 1,
-              child: Hero(
-                tag: 'listing-photo-$id',
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: photoUrl != null
-                      ? CachedNetworkImage(
-                          imageUrl: photoUrl,
-                          fit: BoxFit.cover,
-                          placeholder: (c, _) => Container(color: Colors.grey.shade200),
-                          errorWidget: (c, _, __) => Container(
-                            color: Colors.grey.shade200,
-                            alignment: Alignment.center,
-                            child: const Icon(Icons.image_not_supported_outlined),
-                          ),
-                        )
-                      : Container(
-                          color: Colors.grey.shade300,
-                          alignment: Alignment.center,
-                          child: const Icon(Icons.image_outlined, size: 40, color: Colors.white),
-                        ),
+            Stack(
+              children: [
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: Hero(
+                    tag: 'listing-photo-$id',
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: photoUrl != null
+                          ? CachedNetworkImage(
+                              imageUrl: photoUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (c, _) => Container(color: Colors.grey.shade200),
+                              errorWidget: (c, _, __) => Container(
+                                color: Colors.grey.shade200,
+                                alignment: Alignment.center,
+                                child: const Icon(Icons.image_not_supported_outlined),
+                              ),
+                            )
+                          : Container(
+                              color: Colors.grey.shade300,
+                              alignment: Alignment.center,
+                              child: const Icon(Icons.image_outlined, size: 40, color: Colors.white),
+                            ),
+                    ),
+                  ),
                 ),
-              ),
+                // Botón de favoritos superpuesto
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: _buildFavoriteButton(it),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             Text(
@@ -1635,6 +1678,189 @@ class _HomePageState extends State<HomePage> {
     final rem = cents % 100;
     if (rem == 0) return '\$$intPart';
     return '\$${(cents / 100).toStringAsFixed(2)}';
+  }
+
+  // ============================================================================
+  // FAVORITOS
+  // ============================================================================
+  
+  /// Cargar favoritos desde Hive
+  Future<void> _loadFavorites() async {
+    try {
+      final favorites = _hiveRepo.getFavorites();
+      if (mounted) {
+        setState(() {
+          // Extraer solo los IDs de los favoritos
+          _favoriteIds = favorites
+              .map((fav) => (fav['id'] ?? fav['uuid'] ?? '').toString())
+              .where((id) => id.isNotEmpty)
+              .toSet();
+        });
+      }
+    } catch (e) {
+      print('Error al cargar favoritos: $e');
+    }
+  }
+
+  /// Botón de favoritos con animación
+  Widget _buildFavoriteButton(Map<String, dynamic> listing) {
+    final listingId = (listing['id'] ?? listing['uuid']).toString();
+    final isFavorite = _favoriteIds.contains(listingId);
+    
+    return InkWell(
+      onTap: () => _toggleFavorite(listing),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            )
+          ],
+        ),
+        child: Icon(
+          isFavorite ? Icons.favorite : Icons.favorite_border,
+          size: 20,
+          color: isFavorite ? Colors.red : Colors.grey.shade600,
+        ),
+      ),
+    );
+  }
+
+  /// Toggle favorito
+  Future<void> _toggleFavorite(Map<String, dynamic> listing) async {
+    final listingId = (listing['id'] ?? listing['uuid']).toString();
+    final title = (listing['title'] ?? '').toString();
+    final wasFavorite = _favoriteIds.contains(listingId);
+    
+    // Actualizar UI inmediatamente
+    setState(() {
+      if (wasFavorite) {
+        _favoriteIds.remove(listingId);
+      } else {
+        _favoriteIds.add(listingId);
+      }
+    });
+
+    try {
+      if (wasFavorite) {
+        // Remover de favoritos
+        await _hiveRepo.removeFavorite(listingId);
+        Telemetry.i.click('remove_favorite', listingId: listingId);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$title removido de favoritos'),
+              duration: const Duration(seconds: 2),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      } else {
+        // Agregar a favoritos - crear objeto con datos necesarios
+        final favoriteData = {
+          'id': listingId,
+          'uuid': listingId,
+          'name': title,
+          'title': title,
+          'price_cents': listing['price_cents'],
+          'photo_url': _firstPhotoUrl(listing),
+          'brand_name': listing['brand_name'] ?? listing['brand']?['name'],
+          'category_name': listing['category_name'] ?? listing['category']?['name'],
+          'added_at': DateTime.now().toIso8601String(),
+        };
+        
+        await _hiveRepo.addFavorite(favoriteData);
+        Telemetry.i.click('add_favorite', listingId: listingId);
+        
+        // Agregar notificación
+        try {
+          await _addFavoriteNotification(title);
+        } catch (e) {
+          print('Error al agregar notificación: $e');
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('💖 $title agregado a favoritos'),
+              duration: const Duration(seconds: 2),
+              backgroundColor: Colors.green,
+              action: SnackBarAction(
+                label: 'Ver favoritos',
+                textColor: Colors.white,
+                onPressed: () {
+                  context.push('/favorites');
+                },
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // Revertir cambio si falla
+      setState(() {
+        if (wasFavorite) {
+          _favoriteIds.add(listingId);
+        } else {
+          _favoriteIds.remove(listingId);
+        }
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Agregar notificación de favorito
+  Future<void> _addFavoriteNotification(String productTitle) async {
+    try {
+      // Importar dinámicamente para evitar dependencia circular
+      final notificationsFile = await getApplicationDocumentsDirectory();
+      final filePath = '${notificationsFile.path}/notifications.json';
+      final file = File(filePath);
+      
+      List<Map<String, dynamic>> notifications = [];
+      
+      if (await file.exists()) {
+        final contents = await file.readAsString();
+        final List<dynamic> jsonData = jsonDecode(contents);
+        notifications = jsonData.map((item) => Map<String, dynamic>.from(item)).toList();
+      }
+      
+      notifications.insert(0, {
+        'id': 'fav_${DateTime.now().millisecondsSinceEpoch}',
+        'type': 'favorite',
+        'title': 'Producto agregado a favoritos 💖',
+        'message': '$productTitle guardado en favoritos',
+        'timestamp': DateTime.now().toIso8601String(),
+        'isRead': false,
+        'icon': 'favorite',
+        'color': 'red',
+      });
+      
+      // Limitar a 50 notificaciones
+      if (notifications.length > 50) {
+        notifications = notifications.sublist(0, 50);
+      }
+      
+      await file.writeAsString(jsonEncode(notifications));
+    } catch (e) {
+      print('Error al agregar notificación de favorito: $e');
+    }
   }
 
   /// [BQ1] Business Question: "¿Qué categorías son más populares?"
@@ -1950,6 +2176,139 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  // ============================================================================
+  // SP4 HOME: SQLITE CACHE CON LOCAL SYNC REPOSITORY
+  // ============================================================================
+  
+  /// SP4 HOME: Carga listings desde SQLite cache local
+  /// NOTA: Método preparado para uso futuro cuando se implemente cache completo
+  // ignore: unused_element
+  Future<List<Map<String, dynamic>>> _loadFromSQLiteCache() async {
+    try {
+      print('[SP4 HOME] 📦 Cargando listings desde SQLite...');
+      
+      final localListings = await _localSync.getLocalListings();
+      
+      print('[SP4 HOME] ✅ ${localListings.length} listings obtenidos de SQLite');
+      
+      return localListings;
+    } catch (e) {
+      print('[SP4 HOME] ⚠️ Error al cargar desde SQLite: $e');
+      return [];
+    }
+  }
+  
+  /// SP4 HOME: Sincroniza listings del Backend a SQLite
+  /// NOTA: Método preparado para uso futuro cuando se implemente sincronización automática
+  // ignore: unused_element
+  Future<void> _syncListingsToSQLite() async {
+    try {
+      print('[SP4 HOME] 🔄 Sincronizando listings a SQLite...');
+      
+      await _localSync.syncListingsFromBackend(limit: 200);
+      
+      print('[SP4 HOME] ✅ Listings sincronizados a SQLite exitosamente');
+    } catch (e) {
+      print('[SP4 HOME] ⚠️ Error al sincronizar a SQLite: $e');
+    }
+  }
+
+  // ============================================================================
+  // SP4 HOME: HIVE CACHE RAPIDO (KEY-VALUE)
+  // ============================================================================
+  
+  /// SP4 HOME: Intenta cargar listings desde Hive cache (O(1))
+  /// NOTA: Método preparado para uso futuro cuando se implemente cache Hive
+  // ignore: unused_element
+  Future<List<Map<String, dynamic>>?> _loadFromHiveCache() async {
+    try {
+      print('[SP4 HOME] ⚡ Intentando cargar desde Hive cache...');
+      
+      final cached = await _hiveRepo.getCachedListings();
+      
+      if (cached != null && cached.isNotEmpty) {
+        print('[SP4 HOME] ✅ ${cached.length} listings obtenidos de Hive cache');
+        return cached;
+      }
+      
+      print('[SP4 HOME] ℹ️ No hay datos en Hive cache');
+      return null;
+    } catch (e) {
+      print('[SP4 HOME] ⚠️ Error al cargar desde Hive: $e');
+      return null;
+    }
+  }
+  
+  /// SP4 HOME: Guarda listings en Hive cache para acceso rapido
+  /// NOTA: Método preparado para uso futuro cuando se implemente cache Hive
+  // ignore: unused_element
+  Future<void> _cacheListingsInHive(List<Map<String, dynamic>> listings) async {
+    try {
+      print('[SP4 HOME] 💾 Guardando ${listings.length} listings en Hive cache...');
+      
+      await _hiveRepo.cacheListings(listings);
+      
+      print('[SP4 HOME] ✅ Listings guardados en Hive cache exitosamente');
+    } catch (e) {
+      print('[SP4 HOME] ⚠️ Error al guardar en Hive: $e');
+    }
+  }
+
+  // ============================================================================
+  // SP4 HOME: ANALYTICS CON ISOLATES (BACKGROUND PROCESSING)
+  // ============================================================================
+  
+  /// SP4 HOME: Procesa analytics de listings en Isolate separado
+  /// NOTA: Método preparado para uso futuro cuando se implemente analytics en background
+  // ignore: unused_element
+  Future<void> _processListingsAnalyticsInBackground() async {
+    if (_processingAnalytics) {
+      print('[SP4 HOME] ⏭️ Analytics ya en proceso, omitiendo...');
+      return;
+    }
+    
+    setState(() {
+      _processingAnalytics = true;
+    });
+    
+    try {
+      print('[SP4 HOME] 🚀 Iniciando procesamiento de analytics en Isolate...');
+      
+      final startTime = DateTime.now();
+      
+      // SP4 HOME: Rango de fechas para analytics (últimos 30 días)
+      final endDate = DateTime.now();
+      final startDate = endDate.subtract(const Duration(days: 30));
+      
+      // SP4 HOME: Ejecuta en Isolate separado - NO BLOQUEA LA UI
+      final result = await _analyticsIsolate.processListingsAnalyticsInIsolate(
+        startDate: startDate.toIso8601String().substring(0, 10),
+        endDate: endDate.toIso8601String().substring(0, 10),
+      );
+      
+      final duration = DateTime.now().difference(startTime);
+      
+      print('[SP4 HOME] ✅ Analytics procesados en ${duration.inMilliseconds}ms');
+      print('[SP4 HOME] 📊 Total listings: ${result.totalListings}');
+      print('[SP4 HOME] 📊 Top categoria: ${result.topCategory}');
+      print('[SP4 HOME] 📊 Promedio diario: ${result.averageListingsPerDay.toStringAsFixed(1)}');
+      
+      if (mounted) {
+        setState(() {
+          _processingAnalytics = false;
+        });
+      }
+    } catch (e) {
+      print('[SP4 HOME] ⚠️ Error al procesar analytics: $e');
+      
+      if (mounted) {
+        setState(() {
+          _processingAnalytics = false;
+        });
+      }
+    }
   }
 }
 
