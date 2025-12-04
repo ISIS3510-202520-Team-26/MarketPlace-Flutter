@@ -9,6 +9,10 @@ import '../../presentation/listings/listing_detail_page.dart';
 import '../../presentation/profile/profile_page.dart';
 import '../../presentation/profile/profile_stats_page.dart';
 import '../../presentation/cart/cart_page.dart';
+import '../../presentation/orders/orders_page.dart'; // SP4: Orders Page
+import '../../presentation/reviews/reviews_page.dart'; // SP4: Reviews Page
+import '../../presentation/favorites/favorites_page.dart'; // ✨ SP4 FAV: Favorites Page (3/4)
+import '../../presentation/notifications/notifications_page.dart'; // ✨ SP4 NOTIF: Notifications Page (4/4)
 import '../../data/models/listing.dart';
 
 class AppRouter {
@@ -36,6 +40,14 @@ class AppRouter {
       GoRoute(path: '/profile/stats', builder: (c, s) => const ProfileStatsPage()),
       // 🛒 Carrito de compras
       GoRoute(path: '/cart', builder: (c, s) => const CartPage()),
+      // 📦 SP4: Orders Page - Mis órdenes con SQLite cache y offline mode
+      GoRoute(path: '/orders', builder: (c, s) => const OrdersPage()),
+      // ⭐ SP4: Reviews Page - Mis reviews con Future handlers y async/await
+      GoRoute(path: '/reviews', builder: (c, s) => const ReviewsPage()),
+      // ❤️ ✨ SP4 FAV: Favorites Page - Vista 3/4 con Hive (Preferences) y CachedNetworkImage (Glide/Kingfisher)
+      GoRoute(path: '/favorites', builder: (c, s) => const FavoritesPage()),
+      // 🔔 ✨ SP4 NOTIF: Notifications Page - Vista 4/4 con Local Files y LRU Cache (NSCache equivalent)
+      GoRoute(path: '/notifications', builder: (c, s) => const NotificationsPage()),
     ],
   );
 }

@@ -1,7 +1,20 @@
+// ============================================================================
+// SP4 KV: AUTH REPOSITORY - AUTENTICACION CON HIVE SESSION
+// ============================================================================
+// Repository de autenticación integrado con Hive para persistencia de sesión.
+//
+// IMPLEMENTACIONES SP4:
+// - HiveRepository para gestión de sesión (token, user_id, last_login)
+// - TokenStorage (existente) + Hive session (nuevo)
+// - Persistencia automática de sesión entre reinicios
+//
+// MARCADORES: "SP4 KV AUTH:" para visibilidad en logs
+// ============================================================================
 import 'package:dio/dio.dart';
 import '../models/user.dart';
 import '../../core/net/dio_client.dart';
 import '../../core/security/token_storage.dart';
+import 'hive_repository.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
@@ -11,6 +24,18 @@ import 'package:crypto/crypto.dart';
 /// Basado en los repositories y endpoints del backend.
 class AuthRepository {
   final Dio _dio = DioClient.instance.dio;
+  
+  // SP4 KV AUTH: HiveRepository para persistencia de sesión
+  late final HiveRepository _hiveRepo;
+
+  // SP4 KV AUTH: Constructor - inicializa HiveRepository
+  AuthRepository() {
+    print('SP4 KV AUTH: Inicializando AuthRepository con Hive...');
+    _hiveRepo = HiveRepository(baseUrl: 'http://3.19.208.242:8000/v1');
+    _hiveRepo.initialize().catchError((e) {
+      print('SP4 KV AUTH: Error al inicializar Hive: $e');
+    });
+  }
 
   // ==================== AUTHENTICATION ====================
 
@@ -42,15 +67,20 @@ class AuthRepository {
     }
   }
 
+  // ============================================================================
+  // SP4 KV AUTH: LOGIN CON HIVE SESSION
+  // ============================================================================
   /// Inicia sesión con email y contraseña
   /// 
   /// POST /auth/login
   /// 
-  /// Guarda automáticamente los tokens en TokenStorage
+  /// SP4 KV AUTH: Guarda tokens en TokenStorage Y en Hive session
   Future<AuthTokens> login({
     required String email,
     required String password,
   }) async {
+    print('SP4 KV AUTH: Iniciando login para: $email');
+    
     try {
       final request = UserLoginRequest(
         email: email,
@@ -64,14 +94,36 @@ class AuthRepository {
       
       final tokens = AuthTokens.fromJson(response.data as Map<String, dynamic>);
       
-      // Guardar tokens automáticamente
+      // SP4 KV AUTH: Guardar tokens en TokenStorage (existente)
       await TokenStorage.instance.saveTokens(
         tokens.accessToken,
         tokens.refreshToken,
       );
       
+      print('SP4 KV AUTH: Tokens guardados en TokenStorage');
+      
+      // SP4 KV AUTH: Obtener datos del usuario para cachear en Hive
+      try {
+        final userResponse = await _dio.get('/auth/me');
+        final userData = userResponse.data as Map<String, dynamic>;
+        
+        // SP4 KV AUTH: Guardar sesión completa en Hive
+        await _hiveRepo.startSession(
+          token: tokens.accessToken,
+          userId: userData['id']?.toString() ?? 'unknown',
+          userData: userData,
+        );
+        
+        print('SP4 KV AUTH: Sesión persistida en Hive');
+        print('SP4 KV AUTH: User ID: ${userData['id']}');
+      } catch (e) {
+        print('SP4 KV AUTH: Error al obtener/cachear usuario: $e');
+        // No es crítico, continuamos con el login
+      }
+      
       return tokens;
     } on DioException catch (e) {
+      print('SP4 KV AUTH: Error en login: ${e.message}');
       throw _handleError(e, 'Error en login');
     }
   }
@@ -115,16 +167,28 @@ class AuthRepository {
     }
   }
 
+  // ============================================================================
+  // SP4 KV AUTH: LOGOUT CON LIMPIEZA DE HIVE SESSION
+  // ============================================================================
   /// Cierra sesión del usuario actual
   /// 
-  /// Limpia los tokens del storage local
+  /// SP4 KV AUTH: Limpia tokens del storage Y sesión de Hive
   Future<void> logout() async {
+    print('SP4 KV AUTH: Cerrando sesión...');
+    
     try {
+      // SP4 KV AUTH: Limpiar TokenStorage
       await TokenStorage.instance.clear();
+      print('SP4 KV AUTH: TokenStorage limpiado');
+      
+      // SP4 KV AUTH: Limpiar sesión de Hive
+      await _hiveRepo.endSession();
+      print('SP4 KV AUTH: Sesión Hive limpiada');
       
       // Opcional: Notificar al backend (si tienes endpoint de logout)
       // await _dio.post('/auth/logout');
     } catch (e) {
+      print('SP4 KV AUTH: Error al cerrar sesión: $e');
       throw 'Error al cerrar sesión: $e';
     }
   }

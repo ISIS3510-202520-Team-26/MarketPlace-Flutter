@@ -496,35 +496,40 @@ class _ProfilePageState extends State<ProfilePage> {
             color: Colors.red,
             onTap: () {
               Telemetry.i.click('profile_favorites');
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Próximamente: Favoritos')),
-              );
+              context.push('/favorites'); // ✨ SP4 FAV: Navega a Favorites Page (vista 3/4)
             },
           ),
           const Divider(height: 1, indent: 56),
           _buildActionTile(
             icon: Icons.shopping_bag_outlined,
-            title: 'Mis Compras',
-            subtitle: 'Historial de pedidos',
+            title: 'Mis Órdenes',
+            subtitle: 'Historial de órdenes y compras',
             color: Colors.orange,
             onTap: () {
               Telemetry.i.click('profile_orders');
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Próximamente: Mis compras')),
-              );
+              context.push('/orders'); // SP4: Navega a Orders Page
             },
           ),
           const Divider(height: 1, indent: 56),
           _buildActionTile(
-            icon: Icons.chat_bubble_outline,
-            title: 'Mensajes',
-            subtitle: 'Conversaciones con vendedores',
+            icon: Icons.star_outline,
+            title: 'Mis Reviews',
+            subtitle: 'Reseñas y calificaciones',
+            color: Colors.amber,
+            onTap: () {
+              Telemetry.i.click('profile_reviews');
+              context.push('/reviews'); // SP4: Navega a Reviews Page
+            },
+          ),
+          const Divider(height: 1, indent: 56),
+          _buildActionTile(
+            icon: Icons.notifications_outlined,
+            title: 'Notificaciones',
+            subtitle: 'Alertas y actualizaciones',
             color: Colors.blue,
             onTap: () {
-              Telemetry.i.click('profile_messages');
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Próximamente: Mensajes')),
-              );
+              Telemetry.i.click('profile_notifications');
+              context.push('/notifications'); // ✨ SP4 NOTIF: Navega a Notifications Page (vista 4/4)
             },
           ),
         ],
